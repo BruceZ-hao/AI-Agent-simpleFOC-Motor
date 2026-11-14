@@ -1,0 +1,22 @@
+# Windows 批处理 / PowerShell 必须保持 CRLF，否则双击可能执行异常
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# 源码与文档统一 LF（含 Git 自身配置文件）
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+*.ino  text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.html text eol=lf
+*.svg  text eol=lf
+*.txt  text eol=lf
+*.json text eol=lf
+
+# 二进制产物
+*.bin   binary
+*.blend binary
+*.stl   binary
+*.png   binary
+*.jpg   binary

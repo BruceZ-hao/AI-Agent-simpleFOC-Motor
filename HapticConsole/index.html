@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹簧回中 · SimpleFOC 上位机</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+  --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --accent2:#39c5cf;
+  --ok:#3fb950; --warn:#d29922; --bad:#f85149; --grid:#262c36;
+  --shadow:0 6px 22px rgba(0,0,0,.28);
+}
+html[data-theme="light"]{
+  --bg:#f2f5f9; --panel:#ffffff; --panel2:#f6f8fb; --border:#d8dee7;
+  --fg:#1f2733; --muted:#687386; --accent:#1668d6; --accent2:#0e8f9b;
+  --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e; --grid:#e6ebf2;
+  --shadow:0 6px 20px rgba(31,45,70,.10);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;background:var(--panel2);border:1px solid var(--border);
+  border-radius:7px;padding:7px 13px;transition:.15s}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.primary:hover{filter:brightness(1.12);color:#fff}
+button.danger{border-color:var(--bad);color:var(--bad)}
+button.active{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+select,input[type=number],input[type=text]{background:var(--panel2);border:1px solid var(--border);
+  border-radius:7px;padding:7px 9px;outline:none}
+select:focus,input:focus{border-color:var(--accent)}
+.app{max-width:1480px;margin:0 auto;padding:18px 20px 32px}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:13px}
+.logo{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:800;letter-spacing:-.5px}
+h1{font-size:19px;margin:0;font-weight:650}
+.sub{margin:2px 0 0;color:var(--muted);font-size:12px}
+.head-right{display:flex;align-items:center;gap:10px}
+.badge{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:20px;
+  border:1px solid var(--border);background:var(--panel);font-size:12px;font-weight:600}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.badge.on{border-color:var(--ok);color:var(--ok)} .badge.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.badge.off .dot{background:var(--muted)}
+.badge.err{border-color:var(--bad);color:var(--bad)} .badge.err .dot{background:var(--bad)}
+.notice{margin:16px 0 12px;padding:9px 13px;border-radius:8px;font-size:12.5px;
+  background:var(--panel2);
+  background:color-mix(in srgb,var(--warn) 12%,var(--panel));
+  border:1px solid color-mix(in srgb,var(--warn) 35%,var(--border));color:var(--fg)}
+.bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;
+  background:var(--panel);border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow)}
+.bar label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12.5px}
+.spacer{flex:1}
+.hint{font-size:12px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(390px,42%) 1fr;gap:14px;margin-top:14px;align-items:start}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:11px;
+  padding:15px 16px;box-shadow:var(--shadow);min-width:0}
+.card h2{font-size:13px;margin:0 0 12px;font-weight:650;letter-spacing:.3px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px}
+.card h2 .tools{display:flex;gap:6px}
+.card h2 button{padding:3px 9px;font-size:11.5px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;min-width:0}
+.stat .k{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat .v{font-size:16px;font-weight:650;margin-top:3px;font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat .v small{font-size:10px;font-weight:400;color:var(--muted);margin-left:3px}
+.stat.hl .v{color:var(--accent)}
+.stat.good .v{color:var(--ok)}
+.stat.warn .v{color:var(--warn)}
+.row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.seg{display:flex;gap:6px}
+.field{display:grid;grid-template-columns:82px 1fr 62px;align-items:center;gap:9px;margin:9px 0}
+.field .lab{font-size:12px;color:var(--muted)}
+.field input[type=range]{width:100%;accent-color:var(--accent)}
+.field .num{font-variant-numeric:tabular-nums;text-align:right;font-size:12.5px;
+  color:var(--accent);font-weight:600}
+.divider{height:1px;background:var(--border);margin:14px 0 12px}
+.subttl{font-size:11.5px;color:var(--muted);margin:0 0 8px;text-transform:uppercase;letter-spacing:.6px}
+.twist{display:flex;gap:14px;align-items:center}
+.dial{width:118px;height:118px;flex:0 0 118px}
+.twist-main{flex:1;min-width:0}
+.twist-main input[type=range]{width:100%;accent-color:var(--accent2)}
+.big-num{font-size:22px;font-weight:700;color:var(--accent2);font-variant-numeric:tabular-nums}
+.chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer}
+.chk input{accent-color:var(--accent)}
+.chart{width:100%;height:158px;display:block}
+.chart.small{height:112px;margin-top:6px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px}
+.log{height:206px;overflow:auto;background:var(--panel2);border:1px solid var(--border);
+  border-radius:8px;padding:8px 10px;font:12px/1.65 "Cascadia Mono",Consolas,"Microsoft YaHei",monospace}
+.log .ln{display:flex;gap:8px;white-space:pre-wrap;word-break:break-all}
+.log .t{color:var(--muted);flex:0 0 auto}
+.log .tag{flex:0 0 26px;font-weight:700}
+.log .tag.tx{color:var(--accent)} .log .tag.rx{color:var(--fg)} .log .tag.system{color:var(--warn)}
+.cmdline{display:flex;gap:8px;margin-top:9px}
+.cmdline input{flex:1}
+.errbox{margin-top:9px;padding:8px 10px;border-radius:7px;font-size:12px;
+  border:1px solid var(--bad);color:var(--bad);display:none}
+@media(max-width:1080px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}.field{grid-template-columns:70px 1fr 54px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="logo">FOC</div>
+      <div>
+        <h1>弹簧回中 · 上位机</h1>
+        <p class="sub">ESP32-S3 DevKitC-1 / DengFOC-Mini MP6536 / AS5600 / SimpleFOC 2.4.0</p>
+      </div>
+    </div>
+    <div class="head-right">
+      <span id="connBadge" class="badge off"><span class="dot"></span><span id="connText">未连接</span></span>
+      <button id="themeBtn" title="切换明暗主题">切换主题</button>
+    </div>
+  </header>
+
+  <div class="notice">
+    注意：手扭住不放电机会持续堵转输出（上限 3V），请勿长时间捏轴；不用时断开驱动板 12V。
+    上电或复位后 initFOC() 会让电机正反各转一下，务必保持 12V 供电、三相接好、轴空转。
+  </div>
+
+  <section class="bar">
+    <label>串口
+      <select id="portSel" style="min-width:112px"></select>
+    </label>
+    <button id="refreshBtn">刷新</button>
+    <label>波特率
+      <select id="baudSel"><option>115200</option><option>230400</option><option>57600</option><option>9600</option></select>
+    </label>
+    <button id="connectBtn" class="primary">连接</button>
+    <label>采样
+      <select id="pollSel">
+        <option value="80">12.5 Hz</option>
+        <option value="120" selected>8 Hz</option>
+        <option value="200">5 Hz</option>
+        <option value="500">2 Hz</option>
+        <option value="0">关闭</option>
+      </select>
+    </label>
+    <span class="spacer"></span>
+    <span class="hint" id="hint">连接后自动轮询 D 命令刷新状态</span>
+  </section>
+  <div class="errbox" id="errBox"></div>
+
+  <main class="grid">
+    <div class="col">
+      <section class="card">
+        <h2>实时状态 <span class="hint" id="updTime">等待数据</span></h2>
+        <div class="stats">
+          <div class="stat hl"><div class="k">模式 mode</div><div class="v" id="s_mode">--</div></div>
+          <div class="stat" id="c_enabled"><div class="k">驱动 / 状态</div><div class="v" id="s_enabled">--</div></div>
+          <div class="stat"><div class="k">目标 target</div><div class="v" id="s_target">--<small>rad</small></div></div>
+          <div class="stat hl"><div class="k">原点 home</div><div class="v" id="s_home">--<small>rad</small></div></div>
+          <div class="stat hl"><div class="k">轴角 shaft</div><div class="v" id="s_shaft">--<small>rad</small></div></div>
+          <div class="stat" id="c_err"><div class="k">偏差 err</div><div class="v" id="s_err">--<small>rad</small></div></div>
+          <div class="stat"><div class="k">角速度 vel</div><div class="v" id="s_vel">--<small>rad/s</small></div></div>
+          <div class="stat"><div class="k">输出 Uq</div><div class="v" id="s_uq">--<small>V</small></div></div>
+          <div class="stat"><div class="k">电压限幅</div><div class="v" id="s_vlimit">--<small>V</small></div></div>
+          <div class="stat"><div class="k">刚度 Kp</div><div class="v" id="s_kp">--<small>V/rad</small></div></div>
+          <div class="stat"><div class="k">阻尼 Kd</div><div class="v" id="s_kd">--</div></div>
+          <div class="stat"><div class="k">死区 db</div><div class="v" id="s_db">--<small>rad</small></div></div>
+          <div class="stat"><div class="k">三相 Ua/Ub/Uc</div><div class="v" id="s_phase" style="font-size:12px">--</div></div>
+          <div class="stat"><div class="k">AS5600 原始角</div><div class="v" id="s_angle">--<small>rad</small></div></div>
+          <div class="stat"><div class="k">GPIO4 占空比</div><div class="v" id="s_gpio">--<small>%</small></div></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>控制面板 <span class="hint">命令实时生效，无需重烧</span></h2>
+
+        <p class="subttl">控制模式</p>
+        <div class="seg">
+          <button id="m1Btn" class="active">M1 弹簧回中</button>
+          <button id="m0Btn">M0 速度环</button>
+        </div>
+
+        <div class="divider"></div>
+        <p class="subttl">弹簧参数（对应 K / B / Z 指令）</p>
+        <div class="field">
+          <span class="lab">刚度 K</span>
+          <input type="range" id="kpRange" min="0" max="12" step="0.5" value="8">
+          <span class="num" id="kpNum">8.0</span>
+        </div>
+        <div class="field">
+          <span class="lab">阻尼 B</span>
+          <input type="range" id="kdRange" min="0" max="1" step="0.01" value="0.2">
+          <span class="num" id="kdNum">0.20</span>
+        </div>
+        <div class="field">
+          <span class="lab">死区 Z</span>
+          <input type="range" id="dbRange" min="0" max="0.1" step="0.002" value="0.012">
+          <span class="num" id="dbNum">0.012</span>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button data-cmd="K8 B0.2 Z0.012" id="presetBtn">恢复推荐值</button>
+          <button data-cmd="Z0.03 B0.10">还抖？加大死区</button>
+          <button data-cmd="K12">更硬的弹簧</button>
+        </div>
+
+        <div class="divider"></div>
+        <p class="subttl">模拟手扭（拖动即给目标偏角，松手回中）</p>
+        <div class="twist">
+          <canvas class="dial" id="dial" width="236" height="236"></canvas>
+          <div class="twist-main">
+            <div class="big-num" id="twistNum">0.00 rad</div>
+            <input type="range" id="twistRange" min="-1.5" max="1.5" step="0.01" value="0">
+            <div class="row" style="margin-top:8px">
+              <label class="chk"><input type="checkbox" id="autoReturn" checked>松手自动回中</label>
+              <button data-cmd="T0" id="homeBtn">回到原点</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+        <p class="subttl">速度环（先按 M0 切换）· T0 静音电刹车：S1/S0 开关、G 阻尼、J 速度死区</p>
+        <div class="row">
+          <input type="number" id="velInput" value="2" step="0.5" style="width:88px">
+          <button id="spinBtn">T 起转</button>
+          <button data-cmd="T0">T0 停转</button>
+        </div>
+
+        <div class="divider"></div>
+        <p class="subttl">其它 / 安全</p>
+        <div class="row">
+          <button data-cmd="H">H 重设原点</button>
+          <button data-cmd="D">D 立即诊断</button>
+          <input type="number" id="limitInput" value="3" step="0.5" min="0" style="width:76px" title="电压限幅 V">
+          <button id="limitBtn">L 限压</button>
+          <button class="danger" id="stopBtn">停止输出</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <h2>角度曲线 <span class="tools"><button id="clearBtn">清空</button></span></h2>
+        <canvas class="chart" id="angleChart"></canvas>
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>目标 target</span>
+          <span><i style="background:var(--accent2)"></i>实际 shaft</span>
+          <span><i style="background:var(--muted)"></i>原点 home</span>
+          <span id="winInfo" class="hint"></span>
+        </div>
+        <h2 style="margin-top:16px">输出电压 Uq</h2>
+        <canvas class="chart small" id="uqChart"></canvas>
+        <div class="legend"><span><i style="background:var(--warn)"></i>Uq（正 = 往正方向推）</span></div>
+      </section>
+
+      <section class="card">
+        <h2>串口日志
+          <span class="tools">
+            <button id="scrollBtn">自动滚动：开</button>
+            <button id="exportBtn">导出</button>
+            <button id="clearLogBtn">清空</button>
+          </span>
+        </h2>
+        <div class="log" id="logBox"></div>
+        <div class="cmdline">
+          <input type="text" id="cmdInput" placeholder="原始指令，如 K8 / Z0.03 / M0 / D（回车发送）">
+          <button id="sendBtn">发送</button>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let connected = false, hist = [], autoScroll = true, logLines = [];
+let draggingParam = {kp:false, kd:false, db:false, twist:false};
+let lastTelem = null;
+const MAX_HIST = 420, MAX_LOG = 280;
+
+/* ---------- 主题 ---------- */
+const savedTheme = localStorage.getItem("haptic-theme") || "dark";
+document.documentElement.dataset.theme = savedTheme;
+$("themeBtn").onclick = () => {
+  const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem("haptic-theme", t);
+  drawAll();
+};
+function pal(){
+  const light = document.documentElement.dataset.theme === "light";
+  return {
+    grid: light ? "#e6ebf2" : "#262c36",
+    text: light ? "#687386" : "#8b949e",
+    accent: light ? "#1668d6" : "#58a6ff",
+    accent2: light ? "#0e8f9b" : "#39c5cf",
+    warn: light ? "#9a6700" : "#d29922",
+    muted: light ? "#a3adbb" : "#4b5563",
+    ok: light ? "#1a7f37" : "#3fb950"
+  };
+}
+
+/* ---------- 通用请求 ---------- */
+async function api(path, body){
+  const opt = body === undefined ? {} : {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(body)
+  };
+  const r = await fetch(path, opt);
+  const j = await r.json();
+  if(!j.ok) throw new Error(j.error || "请求失败");
+  return j;
+}
+function showErr(msg){
+  const b = $("errBox");
+  b.textContent = msg; b.style.display = msg ? "block" : "none";
+}
+function setConn(on, text, err){
+  connected = on;
+  const b = $("connBadge");
+  b.className = "badge " + (err ? "err" : (on ? "on" : "off"));
+  $("connText").textContent = text;
+  $("connectBtn").textContent = on ? "断开" : "连接";
+  $("connectBtn").className = on ? "danger" : "primary";
+  $("portSel").disabled = on; $("baudSel").disabled = on;
+}
+
+/* ---------- 端口与连接 ---------- */
+async function refreshPorts(){
+  try{
+    const j = await api("/api/ports");
+    const cur = $("portSel").value;
+    $("portSel").innerHTML = "";
+    if(!j.ports.length){
+      const o = document.createElement("option"); o.textContent = "(无串口)"; o.value="";
+      $("portSel").appendChild(o);
+    } else {
+      j.ports.forEach(p => {
+        const o = document.createElement("option"); o.value=p; o.textContent=p;
+        $("portSel").appendChild(o);
+      });
+      if(j.ports.includes(cur)) $("portSel").value = cur;
+      else $("portSel").value = j.ports.includes("COM6") ? "COM6" : j.ports[j.ports.length-1];
+    }
+    showErr("");
+  }catch(e){ showErr("读取串口列表失败：" + e.message); }
+}
+$("refreshBtn").onclick = refreshPorts;
+$("connectBtn").onclick = async () => {
+  try{
+    if(connected){
+      await api("/api/disconnect", {});
+      setConn(false, "未连接");
+    }else{
+      const port = $("portSel").value, baud = parseInt($("baudSel").value,10);
+      if(!port) throw new Error("没有可用串口");
+      setConn(false, "连接中...");
+      await api("/api/connect", {port, baud});
+      await api("/api/config", {poll_ms: parseInt($("pollSel").value,10)});
+      showErr("");
+    }
+  }catch(e){
+    setConn(false, "连接失败", true);
+    showErr(e.message + "　｜　若提示端口被占用，请先关闭 Arduino IDE 的串口监视器，再点「刷新」重试。");
+  }
+};
+$("pollSel").onchange = async () => {
+  try{ await api("/api/config", {poll_ms: parseInt($("pollSel").value,10)}); }catch(e){ showErr(e.message); }
+};
+
+/* ---------- 命令 ---------- */
+function sendRaw(cmd){
+  cmd = String(cmd).trim();
+  if(!cmd) return;
+  if(!connected){ showErr("请先连接串口"); return; }
+  api("/api/send", {cmd}).catch(e => showErr("发送失败：" + e.message));
+}
+document.querySelectorAll("[data-cmd]").forEach(el => {
+  el.onclick = () => {
+    el.getAttribute("data-cmd").split(/\s+/).forEach((c,i) => setTimeout(()=>sendRaw(c), i*90));
+    if(el.id === "homeBtn" || el.getAttribute("data-cmd") === "T0") resetTwist();
+  };
+});
+$("m1Btn").onclick = () => sendRaw("M1");
+$("m0Btn").onclick = () => sendRaw("M0");
+function resetTwist(){
+  $("twistRange").value = 0; $("twistNum").textContent = "0.00 rad";
+}
+$("sendBtn").onclick = () => { const v=$("cmdInput").value; sendRaw(v); $("cmdInput").value=""; };
+$("cmdInput").onkeydown = e => { if(e.key === "Enter"){ $("sendBtn").click(); } };
+$("spinBtn").onclick = () => sendRaw("T" + $("velInput").value);
+$("limitBtn").onclick = () => sendRaw("L" + $("limitInput").value);
+$("stopBtn").onclick = () => { sendRaw("T0"); resetTwist(); showErr("已发 T0。若长时间不用，请断开驱动板 12V。"); };
+$("presetBtn").onclick = () => {
+  ["K8","B0.2","Z0.012"].forEach((c,i)=>setTimeout(()=>sendRaw(c), i*90));
+  $("kpRange").value=8; $("kdRange").value=0.2; $("dbRange").value=0.012;
+  syncParamLabels();
+};
+
+/* ---------- 参数滑块 ---------- */
+function debounce(fn, ms){
+  let t=null; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); };
+}
+const sendKp = debounce(v => sendRaw("K"+v), 110);
+const sendKd = debounce(v => sendRaw("B"+v), 110);
+const sendDb = debounce(v => sendRaw("Z"+v), 110);
+const sendTwist = debounce(v => sendRaw("T"+v), 70);
+function syncParamLabels(){
+  $("kpNum").textContent = (+$("kpRange").value).toFixed(1);
+  $("kdNum").textContent = (+$("kdRange").value).toFixed(2);
+  $("dbNum").textContent = (+$("dbRange").value).toFixed(3);
+}
+[["kpRange","kp",sendKp],["kdRange","kd",sendKd],["dbRange","db",sendDb]].forEach(([id,key,fn])=>{
+  const el=$(id);
+  el.addEventListener("pointerdown",()=>draggingParam[key]=true);
+  el.addEventListener("pointerup",()=>draggingParam[key]=false);
+  el.addEventListener("input",()=>{ syncParamLabels(); fn(el.value); });
+});
+syncParamLabels();
+
+const twist = $("twistRange");
+function twistReturn(){
+  draggingParam.twist = false;
+  if($("autoReturn").checked){ sendRaw("T0"); resetTwist(); }
+}
+twist.addEventListener("pointerdown",()=>draggingParam.twist=true);
+twist.addEventListener("input",()=>{
+  const v=(+twist.value).toFixed(2);
+  $("twistNum").textContent = (+v>=0?"+":"") + v + " rad";
+  sendTwist(v);
+});
+twist.addEventListener("pointerup", twistReturn);
+twist.addEventListener("change", () => { if(!draggingParam.twist) return; twistReturn(); });
+
+/* ---------- 日志 ---------- */
+function fmtTime(ts){
+  const d = new Date(ts*1000);
+  return d.toTimeString().slice(0,8) + "." + String(d.getMilliseconds()).padStart(3,"0").slice(0,2);
+}
+function addLog(src, text, ts){
+  logLines.push({src, text, ts: ts || Date.now()/1000});
+  if(logLines.length > MAX_LOG) logLines = logLines.slice(-MAX_LOG);
+  renderLog();
+}
+function renderLog(){
+  const box = $("logBox");
+  box.innerHTML = logLines.map(l =>
+    '<div class="ln"><span class="t">'+fmtTime(l.ts)+'</span>'+
+    '<span class="tag '+l.src+'">'+(l.src==="tx"?"TX":l.src==="system"?"SYS":"RX")+'</span>'+
+    '<span>'+escapeHtml(l.text)+'</span></div>').join("");
+  if(autoScroll) box.scrollTop = box.scrollHeight;
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+$("scrollBtn").onclick = () => {
+  autoScroll = !autoScroll;
+  $("scrollBtn").textContent = "自动滚动：" + (autoScroll ? "开" : "关");
+};
+$("clearLogBtn").onclick = () => { logLines=[]; renderLog(); };
+$("clearBtn").onclick = () => { hist=[]; drawAll(); };
+$("exportBtn").onclick = () => {
+  const text = logLines.map(l => fmtTime(l.ts)+" ["+l.src+"] "+l.text).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff"+text],{type:"text/plain;charset=utf-8"}));
+  a.download = "haptic-log-"+new Date().toISOString().replace(/[:.]/g,"-")+".txt";
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+};
+
+/* ---------- 遥测 ---------- */
+const FIELDS = {
+  s_mode:["mode",""], s_target:["target",3], s_home:["home",4], s_shaft:["shaft",4],
+  s_err:["err",4], s_vel:["vel",3], s_uq:["uq",3], s_vlimit:["vlimit",2],
+  s_kp:["kp",2], s_kd:["kd",3], s_db:["db",4], s_angle:["angle",4], s_gpio:["gpio",1]
+};
+const UNITS = {s_target:"rad",s_home:"rad",s_shaft:"rad",s_err:"rad",s_vel:"rad/s",
+  s_uq:"V",s_vlimit:"V",s_kp:"V/rad",s_angle:"rad",s_gpio:"%"};
+function onTelem(t){
+  lastTelem = t;
+  for(const [id,[key,digits]] of Object.entries(FIELDS)){
+    const v = t[key];
+    const el = $(id);
+    if(v === undefined){ el.textContent="--"; continue; }
+    const val = typeof v === "number" ? (digits ? v.toFixed(digits) : String(v)) : v;
+    el.innerHTML = escapeHtml(val) + (UNITS[id] ? '<small>'+UNITS[id]+'</small>' : "");
+  }
+  $("s_enabled").textContent = (t.enabled ? "ON" : "OFF") + " / " + (t.status===4 ? "ready" : t.status);
+  $("c_enabled").className = "stat " + (t.enabled ? "good":"warn");
+  $("s_phase").textContent = [t.ua,t.ub,t.uc].every(x=>x!==undefined)
+    ? t.ua.toFixed(2)+" / "+t.ub.toFixed(2)+" / "+t.uc.toFixed(2) : "--";
+  const e = Math.abs(t.err||0);
+  $("c_err").className = "stat " + (e < (t.db||0.012) ? "good" : (e>0.15 ? "warn":"hl"));
+  $("m1Btn").className = t.mode === "HAPTIC" ? "active" : "";
+  $("m0Btn").className = t.mode === "VELOCITY" ? "active" : "";
+  $("updTime").textContent = "更新 " + new Date().toLocaleTimeString();
+
+  // 未拖动时把固件实际参数同步回滑块
+  if(!draggingParam.kp && t.kp!==undefined) $("kpRange").value = t.kp;
+  if(!draggingParam.kd && t.kd!==undefined) $("kdRange").value = t.kd;
+  if(!draggingParam.db && t.db!==undefined) $("dbRange").value = t.db;
+  if(!draggingParam.kp || !draggingParam.kd || !draggingParam.db) syncParamLabels();
+
+  hist.push({ts:t.ts || Date.now()/1000, shaft:t.shaft, target:t.target, home:t.home,
+             err:t.err, uq:t.uq, vlimit:t.vlimit});
+  if(hist.length > MAX_HIST) hist.shift();
+  drawAll();
+}
+
+/* ---------- 绘图 ---------- */
+function setup(cv){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 600, h = cv.clientHeight || 150;
+  const pw = Math.round(w*dpr), ph = Math.round(h*dpr);
+  if(cv.width !== pw || cv.height !== ph){ cv.width=pw; cv.height=ph; }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+  return {ctx,w,h};
+}
+function drawSeries(ctx, data, key, color, box, lo, hi, dash){
+  if(data.length < 2) return;
+  const {L,T,W,H} = box, p = pal();
+  ctx.save();
+  ctx.strokeStyle=color; ctx.lineWidth=1.8; ctx.setLineDash(dash||[]);
+  ctx.beginPath();
+  data.forEach((d,i)=>{
+    const v=d[key];
+    if(v===undefined||!isFinite(v)) return;
+    const x = L + W*i/(data.length-1);
+    const y = T + H - (v-lo)/Math.max(1e-6,hi-lo)*H;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke(); ctx.restore();
+}
+function axes(ctx, box, lo, hi, unit){
+  const {L,T,W,H} = box, p = pal();
+  ctx.strokeStyle=p.grid; ctx.lineWidth=1;
+  ctx.fillStyle=p.text; ctx.font="10px Consolas,monospace";
+  for(let i=0;i<=4;i++){
+    const y=T+H*i/4;
+    ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(L+W,y); ctx.stroke();
+    const v=hi-(hi-lo)*i/4;
+    ctx.fillText(v.toFixed(2)+(i===0?" "+unit:""), 4, Math.max(T+10,y-3));
+  }
+  for(let i=0;i<=5;i++){
+    const x=L+W*i/5;
+    ctx.beginPath(); ctx.moveTo(x,T); ctx.lineTo(x,T+H); ctx.stroke();
+  }
+}
+function drawAngle(){
+  const cv=$("angleChart"), {ctx,w,h}=setup(cv), p=pal();
+  const box={L:52,T:10,W:w-62,H:h-24};
+  const vals=hist.flatMap(d=>[d.shaft,d.target,d.home]).filter(v=>isFinite(v));
+  let lo,hi;
+  if(vals.length){ lo=Math.min(...vals); hi=Math.max(...vals); }
+  else { lo=-0.5; hi=0.5; }
+  let pad=Math.max(0.08,(hi-lo)*0.15); lo-=pad; hi+=pad;
+  axes(ctx,box,lo,hi,"rad");
+  drawSeries(ctx,hist,"home",p.muted,box,lo,hi,[3,4]);
+  drawSeries(ctx,hist,"target",p.accent,box,lo,hi,[6,3]);
+  drawSeries(ctx,hist,"shaft",p.accent2,box,lo,hi,[]);
+}
+function drawUq(){
+  const cv=$("uqChart"), {ctx,w,h}=setup(cv), p=pal();
+  const box={L:52,T:8,W:w-62,H:h-20};
+  const maxV=Math.max(0.5,...hist.map(d=>Math.abs(d.uq||0)),(lastTelem?.vlimit||3)*0.35);
+  const lo=-maxV*1.1, hi=maxV*1.1;
+  axes(ctx,box,lo,hi,"V");
+  ctx.strokeStyle=p.muted; ctx.lineWidth=1;
+  const zy=box.T+box.H-(0-lo)/(hi-lo)*box.H;
+  ctx.beginPath(); ctx.moveTo(box.L,zy); ctx.lineTo(box.L+box.W,zy); ctx.stroke();
+  drawSeries(ctx,hist,"uq",p.warn,box,lo,hi,[]);
+}
+function drawDial(){
+  const cv=$("dial"), dpr=window.devicePixelRatio||1;
+  const size=cv.clientWidth||118;
+  if(cv.width!==Math.round(size*dpr)){ cv.width=Math.round(size*dpr); cv.height=Math.round(size*dpr); }
+  const ctx=cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,size,size);
+  const p=pal(), cx=size/2, cy=size/2, r=size/2-9;
+  ctx.strokeStyle=p.grid; ctx.lineWidth=8;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  // 刻度
+  ctx.strokeStyle=p.muted; ctx.lineWidth=1.5;
+  for(let i=0;i<12;i++){
+    const a=i*Math.PI/6-Math.PI/2;
+    ctx.beginPath();
+    ctx.moveTo(cx+Math.cos(a)*(r-9),cy+Math.sin(a)*(r-9));
+    ctx.lineTo(cx+Math.cos(a)*(r-3),cy+Math.sin(a)*(r-3));
+    ctx.stroke();
+  }
+  // 目标偏角（细线）与实际偏角（粗指针）
+  const tw=parseFloat($("twistRange").value)||0;
+  const err=lastTelem? (lastTelem.shaft-lastTelem.home) : 0;
+  const needle=(v,color,width)=>{
+    const a=Math.max(-Math.PI,Math.min(Math.PI,v))-Math.PI/2;
+    ctx.strokeStyle=color; ctx.lineWidth=width; ctx.lineCap="round";
+    ctx.beginPath(); ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+Math.cos(a)*(r-13),cy+Math.sin(a)*(r-13)); ctx.stroke();
+  };
+  needle(tw,p.accent,2);
+  needle(err,p.accent2,4);
+  ctx.fillStyle=p.accent2; ctx.beginPath(); ctx.arc(cx,cy,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=p.text; ctx.font="10px sans-serif"; ctx.textAlign="center";
+  ctx.fillText("轴偏角 " + err.toFixed(2) + " rad", cx, size-1);
+  ctx.textAlign="left";
+}
+function drawAll(){
+  drawAngle(); drawUq(); drawDial();
+  const span = hist.length>1 ? (hist[hist.length-1].ts-hist[0].ts) : 0;
+  $("winInfo").textContent = hist.length>1 ? ("窗口 "+span.toFixed(1)+" s / "+hist.length+" 点") : "";
+}
+window.addEventListener("resize", drawAll);
+
+/* ---------- SSE ---------- */
+const es = new EventSource("/api/events");
+es.addEventListener("status", e => {
+  const s = JSON.parse(e.data);
+  setConn(s.connected, s.connected ? (s.port+" @ "+s.baud) : "未连接");
+  $("hint").textContent = s.connected
+    ? ("采样间隔 "+(s.poll_ms||0)+" ms　｜　固件命令 T/L/D/M/H/K/B/Z")
+    : "连接后自动轮询 D 命令刷新状态";
+});
+es.addEventListener("telem", e => onTelem(JSON.parse(e.data)));
+es.addEventListener("log", e => {
+  const d=JSON.parse(e.data);
+  addLog(d.src, d.text, d.ts);
+});
+es.onerror = () => { setConn(false,"服务中断",true); };
+
+/* ---------- 启动 ---------- */
+refreshPorts();
+drawAll();
+addLog("system","上位机就绪。选择串口后点「连接」；重烧固件前请先点「断开」。");
+</script>
+</body>
+</html>

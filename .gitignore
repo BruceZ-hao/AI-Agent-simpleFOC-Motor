@@ -1,0 +1,20 @@
+# Arduino / ESP32 编译中间产物（每个 build/ 约 50~60 MB，可由 IDE 重建）
+**/build/
+*.elf
+*.map
+*.o
+*.a
+
+# 编译 / 上传 / 调试日志（本地留档，不入库）
+*.log
+
+# WorkBuddy 会话数据与项目记忆
+.workbuddy/
+
+# Blender 备份、Python 缓存、系统垃圾
+*.blend1
+*.blend2
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
