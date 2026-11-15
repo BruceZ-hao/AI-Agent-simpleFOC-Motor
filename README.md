@@ -15,7 +15,7 @@
 | 静音刹车 | 速度环 `T0` 停止时绕开 PID 积分噪声，用纯阻尼电刹车滑停（`S1` 默认开启） |
 | 实时调参 | 串口 `K/B/Z/H/G/J` 与上位机滑块都可热调，不用重新编译 |
 | Web 上位机 | 零第三方依赖，实时角度 / Uq 曲线、圆盘指针、参数滑块、串口日志 |
-| 机械件 | 5 个 STL 的开放式台架 + 3 个 STL 的整机外壳（含旋钮），全部水密可直接切片 |
+| 机械件 | 5 个 STL 的开放式台架 + 4 个 STL 的整机外壳（含电机锁板与旋钮），全部水密可直接切片 |
 | 一键烧录 | 附带 4MB 合并镜像与 `.bat` 脚本，无需打开 Arduino IDE |
 
 ## 硬件清单
@@ -87,7 +87,9 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 ### 4. 装机械件
 
 - **开放式台架**：`MountBracket/stl/` 5 个 STL，三块板 + 4 根 M3 长螺杆，AS5600 气隙靠螺母微调。
-- **整机外壳**：`Enclosure/stl/` 3 个 STL（底盒 / 顶盖 / 滚花旋钮），`Enclosure/render/` 有装配、爆炸、内部俯视、结合细节、唇边特写五张渲染图。底盒是**完整平底、无板卡槽**——三块板排针朝下直接堆放，并带 50×35mm 电源模块位置与侧边电源开关口。顶盖与底盒共用同一圆角轮廓，盒口是平齐口沿，四角螺柱顶面与口沿共面承托顶盖；顶盖下方四条直唇边插入内腔定位、四角给螺柱让位。`Enclosure/verify_fit.py` 会把这些配合关系做成自动检查。
+- **整机外壳**：`Enclosure/stl/` 4 个 STL（底盒 / 顶盖 / 滚花旋钮 / **电机锁板**），`Enclosure/render/` 有装配、爆炸、内部俯视、结合细节、唇边特写、锁板爆炸、锁板底面仰视七张渲染图。底盒是**完整平底、无板卡槽**——三块板排针朝下直接堆放，并带 50×35mm 电源模块位置与侧边电源开关口。顶盖与底盒共用同一圆角轮廓，盒口是平齐口沿，四角螺柱顶面与口沿共面承托顶盖；顶盖下方四条直唇边插入内腔定位、四角给螺柱让位。`Enclosure/verify_fit.py` 把这些配合关系做成了自动检查。
+
+  **电机怎么固定**：`02_top_cover.stl` 的 4 条径向长槽只是给电机底部 4 根铜柱让位（能滑动）。要真正锁死，改打印 `04_motor_lock_plate.stl` 与顶盖**二选一**：它是 4 个精确 Ø3.4 孔 + 板底六角螺母沉腔，M3 螺母嵌在腔里不转，铜柱从上穿过拧紧后电机与板成为一体，板再用四角沉头螺钉锁到底盒口沿上。孔距默认 `lock_post_r=14mm`（估算），**打印前量对角两根铜柱中心距 L，把 `lock_post_r` 改成 L/2**，或临时把 `lock_hole_mode` 设成 `"slot"` 免实测。详见 [04-mechanics.md](docs/04-mechanics.md)。
 
 两套方案互相独立，选一套打印即可。尺寸按标准值与实物照片估算，**打印前务必实测并改参数区**（`MountBracket/bracket.py` 顶部 / `Enclosure/enclosure.py` 的 `P` 字典），然后双击各自的 `regen.bat` 重新导出。
 
@@ -132,7 +134,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 ├── ESP32S3_Blink/                点灯 / 串口 / 烧录链路的最小验证工程
 ├── HapticConsole/              ★ 本地 Web 上位机（server.py + index.html + start.bat）
 ├── MountBracket/                 开放式三板台架（bracket.py + 5 STL + 装配图）
-├── Enclosure/                  ★ Blender 整机外壳（enclosure.py + .blend + 3 STL + 5 渲染 + verify_fit.py）
+├── Enclosure/                  ★ Blender 整机外壳（enclosure.py + .blend + 4 STL + 7 渲染 + verify_fit.py）
 ├── docs/                         接线、固件、上位机、机械、排坑五篇文档
 └── README.md / LICENSE / .gitignore / .gitattributes
 ```
@@ -156,7 +158,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 3. FAULT 灯亮 = 过流 / 过温 / 欠压，**立刻断电**查相线与限幅，部分板需重新上电。
 4. 上电 `initFOC()` 会正反微转做对齐，务必让轴空转；手扭住不放会堵转发热。
 5. 重烧固件前先释放串口（关 IDE 监视器、上位机点「断开」）；长时间不用请断 12V。
-6. 3D 打印件尺寸含按标准值/照片估算的部分，打印前实测电机、板卡、支撑柱、电源模块与 USB-C / 开关开孔位置。
+6. 3D 打印件尺寸含按标准值/照片估算的部分，打印前实测电机、板卡、支撑柱、电源模块与 USB-C / 开关开孔位置；**电机锁板的 4 孔孔距尤其要实测**，照片无法给出精确尺寸。
 7. 加电源模块与侧壁开关后，12V 正极先经开关再进模块，输出按实物分给驱动板 VIN 与 ESP32；模块输出电压与极性务必核对，全部共地。
 
 ## 许可

@@ -11,11 +11,15 @@ SimpleFOC 触觉旋钮整机外壳 —— Blender 5.3 参数化生成器
                           三块板（ESP32 / 驱动板 / 5x3.5cm 电源模块）排针朝下直接堆放
   stl/02_top_cover.stl    顶盖 / 电机座（沉台、四柱长槽、中心让位、按钮孔、散热孔）
   stl/03_knob.stl         可选旋钮（滚花 + 轴孔 + 紧定螺钉孔）
+  stl/04_motor_lock_plate.stl  ★ 电机锁板（与 02 顶盖二选一）：4 个精确铜柱孔
+                          + 板底六角螺母沉腔，把电机 4 根铜柱真正锁死
   render/01_assembled.png 成品渲染
   render/02_exploded.png  爆炸装配图
   render/03_interior.png  内部俯视（三块板卡堆放布局）
   render/04_fit.png       结合细节（顶盖抬高，正交展示口沿 / 螺柱 / 同宽外形）
   render/05_lip.png       顶盖底面仰视特写（橙色标注四条直唇边 + 四角给螺柱让位）
+  render/06_lock_plate.png 电机锁板爆炸示意（铜柱 / 锁板 / 六角螺母的锁止关系）
+  render/07_lock_underside.png 锁板底面仰视（橙色高亮 4 个六角螺母沉腔）
   Enclosure.blend         Blender 源文件（含参考体：电机/编码器/ESP32/驱动板/电源模块）
   build_report.txt        参数表、假设清单、BOM、装配步骤、网格自检
 
@@ -83,6 +87,19 @@ P = dict(
     motor_wire_d=9.0, motor_wire_xy=(18.0, -14.0),
     lid_vent_d=3.2, lid_vent_x=34.0, lid_vent_y=20.0, lid_vent_dy=5.0,
     btn_d=4.0, btn_xy=((-43.0, -17.0), (-43.0, -7.0)),
+
+    # ---- 电机锁板（04_motor_lock_plate.stl；与 02 顶盖二选一打印）----
+    # 四根铜柱穿过 4 个精确圆孔，M3 六角螺母嵌在板底六角沉腔里防转，拧紧即锁死电机。
+    # 顶盖的 4 条长槽只是让位（能滑动）；锁板是真正把电机固定住的那块板。
+    lock_t=5.0,                    # 板厚：沉腔深 2.6 后仍有 2.4mm 承力
+    lock_post_r=14.0,              # 铜柱中心到板中心距离，★实测后改这里
+    lock_post_angles=(45.0, 135.0, 225.0, 315.0),
+    lock_hole_d=3.4,               # M3 铜柱 / M3 螺钉过孔
+    lock_nut_af=5.8,               # 六角沉腔对边（M3 螺母对边 5.5 + 0.3 间隙）
+    lock_nut_h=2.6,                # 沉腔深（M3 螺母厚约 2.4）
+    # "round" = 4 个精确圆孔锁死（默认）；"slot" = 4 条径向长槽，免实测兼容孔距
+    lock_hole_mode="round",
+    lock_slot_r0=10.0, lock_slot_r1=22.0, lock_slot_w=6.0,
 
     # ---- 可选旋钮 ----
     knob_d=38.0, knob_h=13.0, shaft_d=5.0,
@@ -260,6 +277,18 @@ def capsule_poly(p0, p1, r, seg=12):
 
 def capsule(name, p0, p1, w, z0, z1, coll=None):
     return prism(name, capsule_poly(p0, p1, w / 2.0), z0, z1, coll)
+
+
+def hex_poly(cx, cy, af, rot=0.0):
+    """正六边形轮廓（对边 af），用于 M3 螺母防转沉腔。
+
+    外接圆半径 R = af / sqrt(3)；rot=30° 时有一对边平行于 X，便于摆放。
+    """
+    R = af / math.sqrt(3.0)
+    a0 = math.radians(rot)
+    return ccw([(cx + R * math.cos(a0 + k * math.pi / 3.0),
+                 cy + R * math.sin(a0 + k * math.pi / 3.0))
+                for k in range(6)])
 
 
 def recalc(obj):
@@ -519,6 +548,93 @@ def build_lid(coll, mat):
 
 
 # ======================================================================
+#  零件 4：电机锁板（与顶盖二选一打印）
+# ======================================================================
+def build_lock_plate(coll, mat):
+    """四根铜柱穿过 4 个精确圆孔，M3 六角螺母嵌在板底沉腔里防转。
+
+    顶盖的 4 条径向长槽只是让位（电机还能沿槽滑动 / 扭动时窜位）；
+    锁板把铜柱位置定死，拧紧螺母后电机与板成为一个整体，板再锁到底盒上。
+    外形、唇边、螺钉孔与顶盖完全一致，所以两块板可互换装配位。
+    """
+    W, D, H = P["case_w"], P["case_d"], P["case_h"]
+    wall, lt = P["wall"], P["lock_t"]
+    plate = prism("04_motor_lock_plate",
+                  rounded_rect_poly(W, D, P["corner_r"]), H, H + lt, coll)
+
+    # 四条定位唇边：与顶盖同一套参数，四角让位给螺柱
+    gap, lw = P["lip_gap"], P["lip_w"]
+    ox = W / 2 - wall - gap
+    oy = D / 2 - wall - gap
+    clear = P["post_od"] / 2 + P["lip_post_clear"]
+    strips = []
+    for sy in (-1, 1):
+        strips.append(box("lip_x", 2 * (P["post_x"] - clear), lw,
+                          P["lip_h"] + 0.4, 0, sy * (oy - lw / 2),
+                          H - P["lip_h"] / 2 + 0.2, coll))
+    for sx in (-1, 1):
+        strips.append(box("lip_y", lw, 2 * (P["post_y"] - clear),
+                          P["lip_h"] + 0.4, sx * (ox - lw / 2), 0,
+                          H - P["lip_h"] / 2 + 0.2, coll))
+    boolean(plate, strips, 'UNION')
+
+    top = H + lt
+    cuts = []
+
+    # 电机沉台 + 中心让位孔（编码器磁铁 / 轴端）
+    cuts.append(cylinder("cut_recess", P["motor_recess_d"] / 2,
+                         P["motor_recess_h"] + 2, 0, 0,
+                         top - P["motor_recess_h"] / 2 + 1, coll=coll))
+    cuts.append(cylinder("cut_axis", P["axis_hole_d"] / 2, lt + 6,
+                         0, 0, H + lt / 2, coll=coll))
+
+    # ★ 核心：4 根铜柱的锁止孔
+    for a_deg in P["lock_post_angles"]:
+        a = math.radians(a_deg)
+        x, y = P["lock_post_r"] * math.cos(a), P["lock_post_r"] * math.sin(a)
+        if P["lock_hole_mode"] == "slot":
+            p0 = (P["lock_slot_r0"] * math.cos(a), P["lock_slot_r0"] * math.sin(a))
+            p1 = (P["lock_slot_r1"] * math.cos(a), P["lock_slot_r1"] * math.sin(a))
+            cuts.append(capsule("cut_lock_slot", p0, p1, P["lock_slot_w"],
+                                H - 2, top + 2, coll))
+        else:
+            # M3 过孔贯通；板底六角沉腔容纳螺母，螺母不会跟着螺杆打转
+            cuts.append(cylinder("cut_lock_post", P["lock_hole_d"] / 2,
+                                 lt + 6, x, y, H + lt / 2, coll=coll))
+            cuts.append(prism("cut_lock_nut",
+                              hex_poly(x, y, P["lock_nut_af"], rot=30.0),
+                              H - 0.2, H + P["lock_nut_h"], coll))
+
+    # 线束过孔
+    cuts.append(cylinder("cut_motor_wire", P["motor_wire_d"] / 2, lt + 6,
+                         P["motor_wire_xy"][0], P["motor_wire_xy"][1],
+                         H + lt / 2, coll=coll))
+    # 四角沉头螺钉（对准底盒螺柱）
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            x, y = sx * P["post_x"], sy * P["post_y"]
+            cuts.append(cylinder("cut_lock_screw", P["lid_screw_d"] / 2,
+                                 lt + 6, x, y, H + lt / 2, coll=coll))
+            cuts.append(cylinder("cut_lock_cs", P["lid_cs_d"] / 2,
+                                 P["lid_cs_h"] + 2, x, y,
+                                 top - P["lid_cs_h"] / 2 + 1, coll=coll))
+    # 散热孔 / BOOT / RESET 针孔
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            for k in (-1, 0, 1):
+                cuts.append(cylinder("cut_lock_vent", P["lid_vent_d"] / 2,
+                                     lt + 6, sx * P["lid_vent_x"],
+                                     sy * P["lid_vent_y"] + k * P["lid_vent_dy"],
+                                     H + lt / 2, coll=coll))
+    for x, y in P["btn_xy"]:
+        cuts.append(cylinder("cut_lock_btn", P["btn_d"] / 2, lt + 6,
+                             x, y, H + lt / 2, coll=coll))
+    boolean(plate, cuts, 'DIFFERENCE')
+    shade(plate, mat)
+    return plate
+
+
+# ======================================================================
 #  零件 3：可选旋钮
 # ======================================================================
 def build_knob(coll, mat):
@@ -768,6 +884,8 @@ def main():
         motor=material("电机 - 黑金属", (0.06, 0.07, 0.09), 0.38, 0.55),
         white=material("白色转盘", (0.95, 0.96, 0.97), 0.5),
         steel=material("金属件", (0.62, 0.65, 0.70), 0.3, 0.8),
+        brass=material("铜柱 - 黄铜", (0.78, 0.55, 0.18), 0.32, 0.75),
+        lock=material("电机锁板 - 蓝灰", (0.26, 0.36, 0.48), 0.62),
         black=material("尼龙柱", (0.10, 0.10, 0.12), 0.7),
         pcb=material("PCB - 黑", (0.06, 0.13, 0.10), 0.65),
         pcb_blue=material("PCB - 深蓝", (0.07, 0.11, 0.22), 0.6),
@@ -776,16 +894,22 @@ def main():
         ground=material("地面", (0.70, 0.73, 0.77), 0.9),
         inspect=material("检视 - 浅灰", (0.52, 0.57, 0.63), 0.8),
         lip=material("定位唇边 - 高亮（仅渲染标注）", (0.95, 0.62, 0.15), 0.5),
+        pocket=material("六角沉腔 - 高亮（仅渲染标注）", (1.0, 0.40, 0.04), 0.5),
         text=material("标注", (0.10, 0.12, 0.16), 0.8),
     )
 
     lower = build_lower(parts_coll, mats["case"])
     lid = build_lid(parts_coll, mats["lid"])
+    lock = build_lock_plate(parts_coll, mats["lock"])
     knob = build_knob(parts_coll, mats["knob"])
     refs = build_references(ref_coll, mats)
 
+    # 锁板与顶盖共用同一装配位（二选一打印），默认在渲染里隐藏，
+    # 只在 06_lock_plate.png 里单独展示；.blend 里对象仍在，可手动切换可见性。
+    lock.hide_render = True
+
     print("=== BUILD DONE ===")
-    for o in (lower, lid, knob):
+    for o in (lower, lid, lock, knob):
         st = mesh_stats(o)
         print("  %-18s tris=%5d nonmanifold=%d boundary=%d vol=%.1f cm3 dims=%s"
               % (o.name, st["tris"], st["nonmanifold"], st["boundary"],
@@ -796,6 +920,7 @@ def main():
         (lower, "01_lower_case.stl"),
         (lid, "02_top_cover.stl"),
         (knob, "03_knob.stl"),
+        (lock, "04_motor_lock_plate.stl"),
     ]
     stl_report = []
     for o, fn in exports:
@@ -861,6 +986,115 @@ def main():
     bpy.data.objects.remove(dup, do_unlink=True)
     bpy.data.meshes.remove(dup_mesh)
 
+    # 电机锁板装配示意（06）：爆炸展示「铜柱穿过 4 个精确孔 + 六角螺母从板底锁死」。
+    # 只用临时示意件，渲染完即删；不改变导出 STL 与 .blend 的装配状态。
+    saved = [(o, o.hide_render) for o in bpy.data.objects if o.type == 'MESH']
+    for o, _ in saved:
+        o.hide_render = True
+    lock.hide_render = False
+    temp = []
+
+    def add_temp(o, m):
+        shade(o, mats[m])
+        temp.append(o)
+        return o
+
+    H, lt, R = P["case_h"], P["lock_t"], P["lock_post_r"]
+    lift = 14.0
+    for a_deg in P["lock_post_angles"]:
+        a = math.radians(a_deg)
+        x, y = R * math.cos(a), R * math.sin(a)
+        add_temp(cylinder("TMP_brass_post", 1.6, 19.0, x, y,
+                          H + 9.5 + lift, coll=helper), "brass")
+        nut = prism("TMP_hex_nut", hex_poly(x, y, 5.5, rot=30.0),
+                    H - 9.0, H - 6.6, helper)
+        boolean(nut, [cylinder("TMP_nut_bore", 1.7, 6.0, x, y,
+                               H - 7.8, coll=helper)], 'DIFFERENCE')
+        add_temp(nut, "steel")
+    add_temp(cylinder("TMP_encoder", P["ref_enc_d"] / 2, P["ref_enc_t"],
+                      0, 0, H + lift + 8.0 + P["ref_enc_t"] / 2,
+                      verts=48, coll=helper), "pcb")
+    add_temp(cylinder("TMP_motor", P["ref_motor_d"] / 2, P["ref_motor_h"],
+                      0, 0, H + lift + 8.0 + P["ref_enc_t"]
+                      + P["ref_motor_h"] / 2, verts=48, coll=helper), "motor")
+    add_temp(cylinder("TMP_disc", P["ref_disc_d"] / 2, P["ref_disc_h"],
+                      0, 0, H + lift + 8.0 + P["ref_enc_t"]
+                      + P["ref_motor_h"] + P["ref_disc_h"] / 2,
+                      verts=48, coll=helper), "white")
+
+    aim(cam, (160, -190, 150), (0, 0, 52), ortho=175)
+    lock_labels = [
+        label("MOTOR + 4 BRASS POSTS", (0, -62, 92), cam, mats["text"], 3.6),
+        label("04  MOTOR LOCK PLATE", (0, -62, 44), cam, mats["text"], 3.6),
+        label("M3 HEX NUTS IN ANTI-ROTATION POCKETS", (0, -62, 24), cam, mats["text"], 3.4),
+        label("4 ROUND HOLES = NO SLIP", (0, -62, 13), cam, mats["text"], 3.4),
+    ]
+    r_lock = render(os.path.join(RENDER_DIR, "06_lock_plate.png"), cam,
+                    (160, -190, 150), (0, 0, 52), ortho=175)
+    print("  RENDER lock", r_lock)
+    for t in lock_labels:
+        bpy.data.objects.remove(t, do_unlink=True)
+    for o in temp:
+        bpy.data.objects.remove(o, do_unlink=True)
+    for o, v in saved:
+        o.hide_render = v
+
+    # 锁板底面仰视特写（07）：橙色高亮 4 个六角螺母沉腔，螺母实地嵌在腔里。
+    # 同色几何在均匀光下看不出轮廓（05_lip 已验证），上色后才一目了然。
+    dup = lock.copy()
+    dup.data = lock.data.copy()
+    dup.name = "RENDER_ONLY_lock_pockets"
+    parts_coll.objects.link(dup)
+    dup.data.materials.clear()
+    dup.data.materials.append(mats["inspect"])
+    dup.data.materials.append(mats["pocket"])
+    pockets = [(P["lock_post_r"] * math.cos(math.radians(a)),
+                P["lock_post_r"] * math.sin(math.radians(a)))
+               for a in P["lock_post_angles"]]
+    for poly in dup.data.polygons:
+        vv = [dup.data.vertices[i].co for i in poly.vertices]
+        cx = sum(v.x for v in vv) / len(vv)
+        cy = sum(v.y for v in vv) / len(vv)
+        cz = sum(v.z for v in vv) / len(vv)
+        if (cz < H + P["lock_nut_h"] + 0.25
+                and any(math.hypot(cx - px, cy - py) < 4.0
+                        for px, py in pockets)):
+            poly.material_index = 1
+    pocket_nuts = []
+    for px, py in pockets:
+        n = prism("TMP_pocket_nut", hex_poly(px, py, 5.5, rot=30.0),
+                  H + 0.1, H + 2.5, helper)
+        boolean(n, [cylinder("TMP_pocket_bore", 1.7, 6.0, px, py,
+                             H + 1.3, coll=helper)], 'DIFFERENCE')
+        shade(n, mats["black"])
+        pocket_nuts.append(n)
+    saved2 = [(o, o.hide_render) for o in bpy.data.objects if o.type == 'MESH']
+    for o, _ in saved2:
+        o.hide_render = True
+    dup.hide_render = False
+    for n in pocket_nuts:
+        n.hide_render = False
+    bpy.ops.object.light_add(type='AREA', location=(0, 0, -60))
+    under = bpy.context.object
+    under.name = "RENDER_ONLY_pocket_light"
+    under.rotation_euler[0] = math.pi      # 面光朝 +Z，照亮板底
+    under.data.energy = 3200
+    under.data.shape = 'DISK'
+    under.data.size = 150
+    # 纯特写：正交尺度收到 72mm，只保留中央 4 个沉腔；不放文字标签，
+    # 避免标签与几何重叠（装配关系由 06 图 + build_report 说明）。
+    r_pocket = render(os.path.join(RENDER_DIR, "07_lock_underside.png"), cam,
+                      (18, -24, -110), (0, 0, 36), ortho=72)
+    print("  RENDER pocket", r_pocket)
+    bpy.data.objects.remove(under, do_unlink=True)
+    for o, v in saved2:
+        o.hide_render = v
+    dup_mesh = dup.data
+    bpy.data.objects.remove(dup, do_unlink=True)
+    bpy.data.meshes.remove(dup_mesh)
+    for n in pocket_nuts:
+        bpy.data.objects.remove(n, do_unlink=True)
+
     # 内部俯视：隐藏顶盖 / 电机 / 旋钮 / 地面
     hidden = [lid, knob, refs["motor"], refs["disc"], refs["shaft"],
               refs["encoder"], refs["pillars"], ground]
@@ -923,7 +1157,8 @@ def main():
 
     # ---- 报告 ----
     write_report(stl_report, blend_path,
-                 (r_assembled, r_exploded, r_interior, r_fit, r_lip))
+                 (r_assembled, r_exploded, r_interior, r_fit, r_lip,
+                  r_lock, r_pocket))
     print("=== ALL DONE ===")
 
 
@@ -999,6 +1234,34 @@ def write_report(stl_report, blend_path, renders):
     A("     两侧壁各 15 条散热格栅，顶盖 12 个散热孔 + 2 个 BOOT/RESET 针孔。")
     A("  4) 四角 M3 螺柱 + 沉头螺钉固定顶盖；底面 4 个 Ø%.1f 橡胶脚垫凹坑。" % P["foot_d"])
     A("")
+    lr = P["lock_post_r"]
+    A("【04 电机锁板 —— 把 4 根铜柱真正锁死】（本次新增）")
+    A("  * 与 02_top_cover.stl 二选一打印：两者外形 / 唇边 / 四角螺钉孔完全相同，装在同一位置。")
+    A("    02 是 4 条径向长槽（只让位，电机仍能沿槽窜动）；04 是 4 个精确孔 + 螺母沉腔（锁死）。")
+    A("  板厚 %.1f mm（六角沉腔深 %.1f 后仍留 %.1f mm 承力），底面 z=%.1f 压在口沿与螺柱顶面上。"
+      % (P["lock_t"], P["lock_nut_h"], P["lock_t"] - P["lock_nut_h"], H))
+    if P["lock_hole_mode"] == "round":
+        A("  4 个 Ø%.1f 通孔，中心在半径 R=%.1f mm、角度 %s°；"
+          % (P["lock_hole_d"], lr, "/".join(str(int(a)) for a in P["lock_post_angles"])))
+        A("  即坐标 (±%.2f, ±%.2f)，相邻孔距 %.2f mm、对角孔距 %.2f mm。"
+          % (lr / math.sqrt(2), lr / math.sqrt(2), lr * math.sqrt(2), 2 * lr))
+        A("  每个孔底面有对边 %.1f、深 %.1f 的六角沉腔：M3 螺母嵌进去不能自转，"
+          "铜柱从上往下穿过后单手拧即可锁紧，电机不会再随旋钮扭动而窜位。"
+          % (P["lock_nut_af"], P["lock_nut_h"]))
+    else:
+        A("  当前 lock_hole_mode='slot'：4 条径向长槽（半径 %.1f~%.1f、宽 %.1f），"
+          "免实测兼容孔距，但可滑动；量准孔距后改回 'round' 才能真正锁死。"
+          % (P["lock_slot_r0"], P["lock_slot_r1"], P["lock_slot_w"]))
+    A("  若铜柱是内螺纹铜柱（standoff）而不是外螺纹螺杆：不改孔，从板底用 M3x10 螺钉")
+    A("  穿过沉腔拧进铜柱即可，沉腔同样容纳螺钉头。")
+    A("  ★ 孔距实测方法（照片无法精确定尺寸，默认 R=%.1f 是按现有参考体估算）：" % lr)
+    A("      量对角两根铜柱中心距 L -> lock_post_r = L / 2")
+    A("      或量相邻两根中心距 S   -> lock_post_r = S / 1.414")
+    A("      若柱子沿 X/Y 轴而不是 45° 对角，把 lock_post_angles 改成 (0, 90, 180, 270)。")
+    A("      一时量不准就先把 lock_hole_mode 设成 'slot' 装上，量准后再切回 'round' 重打一块。")
+    A("  装配示意见 render/06_lock_plate.png（爆炸展示铜柱 / 锁板 / 六角螺母）；")
+    A("  板底 4 个六角沉腔见 render/07_lock_underside.png（橙色为渲染标注色，打印件单色）。")
+    A("")
     A("【STL 自检】")
     total_bad = 0
     for fn, size, st in stl_report:
@@ -1013,6 +1276,8 @@ def write_report(stl_report, blend_path, renders):
       % (P["ref_motor_d"], P["ref_motor_h"], P["ref_disc_d"], P["ref_disc_h"], P["ref_enc_d"]))
     A("  - 4 根支撑柱 Ø%.1f、长 %.1f、分布半径 %.1f（照片估算）"
       % (P["ref_pillar_d"], P["ref_pillar_h"], P["ref_pillar_r"]))
+    A("  - ★ 锁板孔位 R=%.1f 与铜柱同按照片估算：打印前务必实测对角孔距并改 lock_post_r，"
+      "否则 4 个孔会对不上实物铜柱。" % lr)
     A("  - 轴径 Ø%.1f（旋钮孔径），M3 紧定螺钉横孔 Ø%.1f"
       % (P["shaft_d"], P["set_screw_d"]))
     A("  - ESP32-S3 板 USB-C 端中心高度 z=%.1f；BOOT/RESET 针孔位置按常见 DevKitC-1 估计。" % P["usb_z"])
@@ -1026,14 +1291,18 @@ def write_report(stl_report, blend_path, renders):
     A("  小型拨动开关 x1（开孔 Ø%.1f）或船型开关 x1（开孔 %.1f x %.1f），串在 12V 正极上"
       % (P["sw_d"], P["sw_rect_w"], P["sw_rect_h"]))
     A("  泡棉双面胶 / 尼龙脚垫 2~3mm 若干（可选，垫在板下防滑动、让排针不顶到底）")
-    A("  M3 x 12 沉头螺钉 x4（顶盖 -> 底盒螺柱，自攻进 Ø2.6 孔）")
-    A("  M3 螺母 + 垫片(Ø10) x4（把电机 4 根支撑柱锁在顶盖长槽上；若柱内是 M3 螺纹则改用 M3x10 螺钉）")
+    A("  M3 x 12 沉头螺钉 x4（顶盖 / 锁板 -> 底盒螺柱，自攻进 Ø2.6 孔）")
+    A("  【用 02 顶盖】M3 螺母 + Ø10 垫片 x4（长槽只让位，电机仍可滑动）")
+    A("  【用 04 锁板】M3 六角螺母 x4（嵌进板底六角沉腔，防转锁死；")
+    A("                 若铜柱是内螺纹 standoff 则改 M3x10 螺钉 x4）")
     A("  橡胶脚垫 Ø8 x4、少量热熔胶（固定线束）、扎带 x2")
     A("  USB-C 数据线 x1、12V 电源线 x1（从 +X 出线孔引出）")
     A("")
     A("【打印建议】")
     A("  PLA 或 PETG；层高 0.2 mm；填充 20%；壁 3 圈；底盒开口朝上打印，无需支撑。")
     A("  顶盖沉台朝上；旋钮竖放（轴孔垂直），滚花朝外。")
+    A("  04 锁板底面（六角沉腔面）朝下打印：沉腔上方是跨度 %.1f mm 的短桥，"
+      "PLA 可直接桥接免支撑；若切片软件自动加支撑也很好拆。" % P["lock_nut_af"])
     A("  螺柱自攻孔 Ø2.6 若太紧可用 M3 丝锥或 3.0 钻头轻扩。")
     A("")
     A("【装配顺序】")
@@ -1041,8 +1310,10 @@ def write_report(stl_report, blend_path, renders):
     A("     让 ESP32 的 USB-C 对准 -X 侧壁开口；需要防滑就垫 2~3mm 泡棉。")
     A("  2. 开关装进 +X 侧壁开孔；12V 电源线从 Ø8 出线孔穿入，经开关到电源模块，")
     A("     模块输出再分给驱动板 VIN 与 ESP32；三相线 + 编码器线从顶盖 Ø9 过孔穿入。")
-    A("  3. 电机 4 根支撑柱对准顶盖长槽插入，从盒内侧用螺母/垫片或螺钉锁紧。")
-    A("  4. 盖上顶盖：四条唇边对准内腔插入，底面压平在口沿与四个螺柱顶面上，"
+    A("  3. 【二选一】用 02 顶盖：4 根铜柱对准长槽插入，从盒内侧用 M3 螺母 + Ø10 垫片带紧（可滑动）。")
+    A("     用 04 锁板：先把 M3 六角螺母按进板底 4 个六角沉腔，铜柱从上方穿过 4 个 Ø3.4 孔")
+    A("     拧进螺母并锁紧；电机与锁板成为一体，再把锁板盖到底盒口沿上。")
+    A("  4. 盖上顶盖 / 锁板：四条唇边对准内腔插入，底面压平在口沿与四个螺柱顶面上，"
       "四角拧入 M3x12 沉头螺钉。")
     A("     先不拧死、试合一次：顶盖应能整面落到底、四周无缝，若有顶手就检查"
       "螺柱顶面是否有毛刺或唇边是否被切片机加了支撑/大象脚。")
@@ -1057,7 +1328,8 @@ def write_report(stl_report, blend_path, renders):
     A("")
     A("【渲染图】")
     for name, size in zip(("01_assembled.png", "02_exploded.png",
-                           "03_interior.png", "04_fit.png", "05_lip.png"), renders):
+                           "03_interior.png", "04_fit.png", "05_lip.png",
+                           "06_lock_plate.png", "07_lock_underside.png"), renders):
         A("  render/%-20s %7d bytes" % (name, size))
     A("  源文件 %s (%d bytes)" % (os.path.basename(blend_path), os.path.getsize(blend_path)))
     A("")

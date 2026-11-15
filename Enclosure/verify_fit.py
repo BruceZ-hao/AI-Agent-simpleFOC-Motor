@@ -79,6 +79,24 @@ def min_dist_to_posts(segs, P):
     return best
 
 
+def hole_radius(segs, cx, cy, lo=0.8, hi=4.0):
+    """截面里某个圆孔 / 六角沉腔的边界半径。
+
+    截面线段端点落在孔壁上，取距孔中心 lo~hi 的点集中位数。
+    hi=4.0 可以排除 Ø42 沉台、Ø12 中心孔和 Ø9 线束孔的干扰。
+    """
+    ds = []
+    for (x0, y0), (x1, y1) in segs:
+        for x, y in ((x0, y0), (x1, y1)):
+            d = math.hypot(x - cx, y - cy)
+            if lo < d < hi:
+                ds.append(d)
+    if not ds:
+        return None
+    ds.sort()
+    return ds[len(ds) // 2]
+
+
 def main():
     P = load_params()
     W, D, H = P["case_w"], P["case_d"], P["case_h"]
@@ -141,8 +159,64 @@ def main():
         bool(lid_body) and bool(rim),
         "两零件在 z=H 上下相邻，中间无空隙")
 
+    # ---- 04 电机锁板（与顶盖二选一）----
+    lock_path = os.path.join(HERE, "stl", "04_motor_lock_plate.stl")
+    if os.path.exists(lock_path):
+        lock = read_stl(lock_path)
+        lt = P["lock_t"]
+        lk_body = segments(lock, H + lt / 2)
+        lk_bb = bbox(lk_body)
+        chk("锁板在 z=H+lt/2 有实体", bool(lk_body),
+            "截面线段 %d 条" % len(lk_body))
+        if rb and lk_bb:
+            chk("锁板外轮廓与底盒 / 顶盖一致，侧面齐平",
+                all(abs(a - b) < tol for a, b in zip(rb, lk_bb)),
+                "实测 X±%.2f / Y±%.2f" % (lk_bb[1], lk_bb[3]))
+        posts4 = [(P["lock_post_r"] * math.cos(math.radians(a)),
+                   P["lock_post_r"] * math.sin(math.radians(a)))
+                  for a in P["lock_post_angles"]]
+        if P["lock_hole_mode"] == "round":
+            upper = segments(lock, H + P["lock_nut_h"] + 0.5)
+            rr = [hole_radius(upper, x, y) for x, y in posts4]
+            chk("4 个铜柱过孔 Ø%.1f 贯通" % P["lock_hole_d"],
+                all(r is not None and abs(r - P["lock_hole_d"] / 2) < 0.15
+                    for r in rr),
+                "实测半径 %s" % ", ".join("%.2f" % r if r else "NONE" for r in rr))
+            nut = segments(lock, H + 0.5)
+            hr = [hole_radius(nut, x, y) for x, y in posts4]
+            chk("板底 4 个六角螺母沉腔（比过孔大，防转）",
+                all(r is not None
+                    and r > P["lock_hole_d"] / 2 + 0.8
+                    and r <= P["lock_nut_af"] / math.sqrt(3.0) + 0.2
+                    for r in hr),
+                "实测腔半径 %s（过孔 %.2f）"
+                % (", ".join("%.2f" % r if r else "NONE" for r in hr),
+                   P["lock_hole_d"] / 2))
+        else:
+            chk("锁板为长槽模式（免实测，但电机可滑动）", True,
+                "lock_hole_mode='slot'，量准孔距后改回 'round'")
+        screw = segments(lock, H + lt / 2)
+        sr = [hole_radius(screw, sx * P["post_x"], sy * P["post_y"])
+              for sx in (-1, 1) for sy in (-1, 1)]
+        chk("锁板四角安装孔对准底盒螺柱",
+            all(r is not None and abs(r - P["lid_screw_d"] / 2) < 0.15
+                for r in sr),
+            "实测半径 %s" % ", ".join("%.2f" % r if r else "NONE" for r in sr))
+        chk("锁板孔距与参考铜柱一致（改参数时两处要同步）",
+            abs(P["lock_post_r"] - P["ref_pillar_r"]) < tol,
+            "lock_post_r=%.2f / ref_pillar_r=%.2f"
+            % (P["lock_post_r"], P["ref_pillar_r"]))
+        lk_lip = segments(lock, H - 1.0)
+        chk("锁板唇边与四角螺柱不干涉",
+            min_dist_to_posts(lk_lip, P) > post_r,
+            "材料到螺柱中心最近 %.2f mm > %.2f mm"
+            % (min_dist_to_posts(lk_lip, P), post_r))
+    else:
+        chk("04_motor_lock_plate.stl 存在", False,
+            "未找到锁板 STL，请先跑 regen.bat")
+
     print("=" * 74)
-    print(" 顶盖 / 底盒结合处几何校验")
+    print(" 顶盖 / 底盒 / 电机锁板 配合校验")
     print("=" * 74)
     for name, ok, detail in checks:
         print("  [%s] %-38s %s" % ("PASS" if ok else "FAIL", name, detail))
