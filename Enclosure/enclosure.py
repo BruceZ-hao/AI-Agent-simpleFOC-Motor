@@ -15,6 +15,8 @@ SimpleFOC 触觉旋钮整机外壳 —— Blender 5.3 参数化生成器
                           + 板底六角螺母沉腔，把电机 4 根铜柱真正锁死
   stl/05_standalone_motor_plate.stl  ★ 独立小方板（完全脱离外壳）：60x60，
                           同样 4 个铜柱孔 + 六角沉腔，四角通用安装孔
+  stl/06_tft_panel.stl    ★ 独立 TFT 显示面板（完全脱离外壳）：54x56，
+                          正面视窗 + 背面模组限位框 + 4 个 M2 柱 + 2 个 M3 安装孔
   render/01_assembled.png 成品渲染
   render/02_exploded.png  爆炸装配图
   render/03_interior.png  内部俯视（三块板卡堆放布局）
@@ -24,6 +26,8 @@ SimpleFOC 触觉旋钮整机外壳 —— Blender 5.3 参数化生成器
   render/07_lock_underside.png 锁板底面仰视（橙色高亮 4 个六角螺母沉腔）
   render/08_standalone_plate.png 独立小方板顶面俯视（4 铜柱孔 + 4 安装孔 + 中心/线束孔）
   render/09_standalone_underside.png 独立小方板底面仰视（六角沉腔 + 四角安装孔）
+  render/10_tft_panel_front.png TFT 面板正面俯视（视窗 + 屏幕示意 + 左右 M3 孔）
+  render/11_tft_panel_back.png TFT 面板背面斜仰视（橙色标注限位框 / 柱 / 排线缺口）
   Enclosure.blend         Blender 源文件（含参考体：电机/编码器/ESP32/驱动板/电源模块）
   build_report.txt        参数表、假设清单、BOM、装配步骤、网格自检
 
@@ -116,6 +120,22 @@ P = dict(
     mini_axis_d=12.0,              # 中心让位孔（编码器磁铁 / 轴端）
     mini_wire_d=9.0, mini_wire_xy=(0.0, -20.0),  # 三相线 + 编码器线过孔
     mini_blend_x=150.0,            # .blend 里把独立板摆到底盒旁边，避免视觉重叠
+
+    # ---- 06 TFT 显示面板（独立件，与外壳 / 锁板 / 独立板都没有装配关系）----
+    # 1.83" ST7789P3 240x284：可视区约 30 x 35.5 mm，模组外框按 35 x 42 估算。
+    # 正面开视窗，背面一圈限位框把模组嵌住，4 个 M2 自攻柱配小压片压住 PCB；
+    # 左右 2 个 M3 孔把整块面板锁到外壳侧面 / 支架 / 台面。
+    # ★ 实物到手先量模组外框，改 tft_mod_w / tft_mod_h / tft_win_* 再跑 regen.bat。
+    tft_panel_w=54.0, tft_panel_d=56.0, tft_panel_t=3.0, tft_panel_r=4.0,
+    tft_win_w=30.5, tft_win_h=36.0,     # 比可视区每边大 0.25，不遮像素
+    tft_mod_w=35.0, tft_mod_h=42.0,     # ★ 实测模组 PCB 外框（不是可视区）
+    tft_mod_clear=0.2,                  # 限位框与模组单边间隙
+    tft_frame_wall=1.6, tft_frame_h=2.2,
+    tft_notch_w=14.0, tft_notch_d=8.0, tft_notch_y=-22.0,  # 下边排线出口
+    tft_boss_d=3.2, tft_boss_hole_d=1.6,                   # 4 个 M2 自攻柱
+    tft_boss_x=23.0, tft_boss_y=25.0,
+    tft_mount_d=3.4, tft_mount_x=23.0,                     # 左右 2 个 M3 孔 (y=0)
+    tft_blend_x=-160.0,          # .blend 里摆到底盒另一侧，与独立板分开
 
     # ---- 可选旋钮 ----
     knob_d=38.0, knob_h=13.0, shaft_d=5.0,
@@ -707,6 +727,71 @@ def build_standalone_plate(coll, mat):
 
 
 # ======================================================================
+#  零件 6：独立 TFT 显示面板（1.83" ST7789P3 / 240x284）
+# ======================================================================
+def build_tft_panel(coll, mat):
+    """一块独立的屏幕面板，不属于 110x76 外壳。
+
+    为什么不做进顶盖：顶盖中心是 Ø42 电机沉台，右侧到内腔壁的净宽只有
+    W/2 - wall - motor_recess_d/2 = 31.6 mm，小于 35 x 42 mm 模组需要的
+    35 mm；硬塞会切进沉台、压住散热孔和螺柱沉头，还会破坏已验证的结合面。
+    所以做成独立件：正面矩形视窗 + 背面限位框 + 4 个 M2 柱 + 2 个 M3 安装孔，
+    用螺钉锁到外壳侧面、支架或台面，位置随意。
+
+    Z 约定：背面结构（限位框 / 柱）底面 z=0，面板本体 z=fh..fh+t。
+    打印时正面朝平台，限位框与柱朝上，全程无需支撑。
+    """
+    W, D, t = P["tft_panel_w"], P["tft_panel_d"], P["tft_panel_t"]
+    fh = P["tft_frame_h"]
+    z0, z1 = fh, fh + t
+    panel = prism("06_tft_panel",
+                  rounded_rect_poly(W, D, P["tft_panel_r"]), z0, z1, coll)
+
+    # --- 背面限位框：外框减内框，下边留排线缺口 ---
+    cl = P["tft_mod_clear"]
+    iw, idp = P["tft_mod_w"] + 2 * cl, P["tft_mod_h"] + 2 * cl
+    ow, od = iw + 2 * P["tft_frame_wall"], idp + 2 * P["tft_frame_wall"]
+    ring_h = fh + 0.4                       # 与面板重叠 0.4，布尔 UNION 才稳定
+    ring = box("TMP_tft_ring", ow, od, ring_h, 0, 0, ring_h / 2, coll)
+    inner = box("TMP_tft_inner", iw, idp, fh + 2.0, 0, 0, ring_h / 2, coll)
+    # 缺口只切到面板底面以下 0.01，不伤面板本体；下壁断开后线束可直接走出
+    notch_h = z0 - 0.01 + 1.0
+    notch = box("TMP_tft_notch", P["tft_notch_w"], P["tft_notch_d"],
+                notch_h, 0, P["tft_notch_y"], notch_h / 2 - 1.0, coll)
+    boolean(ring, [inner, notch], 'DIFFERENCE')
+
+    # --- 4 个 M2 自攻柱：与限位框错开，坐落在圆角圆心附近，不切穿板边 ---
+    adds = [ring]
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            adds.append(cylinder("tft_boss", P["tft_boss_d"] / 2, ring_h,
+                                 sx * P["tft_boss_x"], sy * P["tft_boss_y"],
+                                 ring_h / 2, coll=coll))
+    boolean(panel, adds, 'UNION')
+
+    cuts = []
+    # 正面视窗：略大于可视区，四周留 2.45 / 3.2 mm 压边压住模组 PCB
+    cuts.append(box("cut_tft_win", P["tft_win_w"], P["tft_win_h"],
+                    z1 + 4.0, 0, 0, z1 / 2, coll))
+    # 柱内 M2 自攻盲孔：从柱底向上，不穿透正面
+    boss_hole_h = fh + 2.0
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            cuts.append(cylinder("cut_tft_boss", P["tft_boss_hole_d"] / 2,
+                                 boss_hole_h, sx * P["tft_boss_x"],
+                                 sy * P["tft_boss_y"],
+                                 boss_hole_h / 2 - 1.0, coll=coll))
+    # 左右 2 个 M3 安装孔：把面板锁到外壳侧面 / 支架 / 台面
+    for sx in (-1, 1):
+        cuts.append(cylinder("cut_tft_mount", P["tft_mount_d"] / 2,
+                             z1 + 4.0, sx * P["tft_mount_x"], 0,
+                             z1 / 2, coll=coll))
+    boolean(panel, cuts, 'DIFFERENCE')
+    shade(panel, mat)
+    return panel
+
+
+# ======================================================================
 #  零件 3：可选旋钮
 # ======================================================================
 def build_knob(coll, mat):
@@ -959,6 +1044,8 @@ def main():
         brass=material("铜柱 - 黄铜", (0.78, 0.55, 0.18), 0.32, 0.75),
         lock=material("电机锁板 - 蓝灰", (0.26, 0.36, 0.48), 0.62),
         mini=material("独立小方板 - 浅蓝灰", (0.48, 0.58, 0.68), 0.6),
+        tft=material("TFT 面板 - 浅灰白", (0.72, 0.75, 0.79), 0.65),
+        tft_screen=material("屏幕示意 - 深蓝（仅渲染）", (0.04, 0.15, 0.38), 0.3),
         black=material("尼龙柱", (0.10, 0.10, 0.12), 0.7),
         pcb=material("PCB - 黑", (0.06, 0.13, 0.10), 0.65),
         pcb_blue=material("PCB - 深蓝", (0.07, 0.11, 0.22), 0.6),
@@ -975,6 +1062,7 @@ def main():
     lid = build_lid(parts_coll, mats["lid"])
     lock = build_lock_plate(parts_coll, mats["lock"])
     mini = build_standalone_plate(parts_coll, mats["mini"])
+    tft = build_tft_panel(parts_coll, mats["tft"])
     knob = build_knob(parts_coll, mats["knob"])
     refs = build_references(ref_coll, mats)
 
@@ -984,9 +1072,12 @@ def main():
     # 独立小方板建模在 z=0..mini_t（STL 原点即板底面），与底盒空间重叠，
     # 除了 08 / 09 两张专属渲染一律隐藏；保存 .blend 前再挪到底盒旁边。
     mini.hide_render = True
+    # TFT 面板是与外壳完全无关的独立件，建模在 z=0..5.2 也和底盒空间重叠，
+    # 只在 10 / 11 两张专属渲染里出现；保存 .blend 前挪到底盒另一侧。
+    tft.hide_render = True
 
     print("=== BUILD DONE ===")
-    for o in (lower, lid, lock, mini, knob):
+    for o in (lower, lid, lock, mini, tft, knob):
         st = mesh_stats(o)
         print("  %-18s tris=%5d nonmanifold=%d boundary=%d vol=%.1f cm3 dims=%s"
               % (o.name, st["tris"], st["nonmanifold"], st["boundary"],
@@ -999,6 +1090,7 @@ def main():
         (knob, "03_knob.stl"),
         (lock, "04_motor_lock_plate.stl"),
         (mini, "05_standalone_motor_plate.stl"),
+        (tft, "06_tft_panel.stl"),
     ]
     stl_report = []
     for o, fn in exports:
@@ -1251,6 +1343,67 @@ def main():
     for n in mini_nuts:
         bpy.data.objects.remove(n, do_unlink=True)
 
+    # TFT 面板正面（10）：视窗里放一块深蓝「屏幕示意」，其余零件全部隐藏。
+    # 示意件只在渲染存在，不进 STL / .blend。
+    saved5 = [(o, o.hide_render) for o in bpy.data.objects if o.type == 'MESH']
+    for o, _ in saved5:
+        o.hide_render = True
+    tft.hide_render = False
+    scr = box("TMP_tft_screen", P["tft_win_w"] - 0.6,
+              P["tft_win_h"] - 0.6, 0.8, 0, 0,
+              P["tft_frame_h"] + 0.2, helper)
+    shade(scr, mats["tft_screen"])
+    scr.hide_render = False
+    bpy.ops.object.light_add(type='AREA', location=(20, -30, 90))
+    tft_light = bpy.context.object
+    tft_light.name = "RENDER_ONLY_tft_top_light"
+    tft_light.data.energy = 3600
+    tft_light.data.shape = 'DISK'
+    tft_light.data.size = 120
+    r_tft = render(os.path.join(RENDER_DIR, "10_tft_panel_front.png"), cam,
+                   (0, -6, 140), (0, 0, 2), ortho=88)
+    print("  RENDER tft front", r_tft)
+    bpy.data.objects.remove(tft_light, do_unlink=True)
+    for o, v in saved5:
+        o.hide_render = v
+
+    # TFT 面板背面仰视（11）：橙色高亮限位框 / 4 个 M2 柱 / 下边排线缺口。
+    tdup = tft.copy()
+    tdup.data = tft.data.copy()
+    tdup.name = "RENDER_ONLY_tft_frame"
+    parts_coll.objects.link(tdup)
+    tdup.data.materials.clear()
+    tdup.data.materials.append(mats["inspect"])
+    tdup.data.materials.append(mats["pocket"])
+    for poly in tdup.data.polygons:
+        vv = [tdup.data.vertices[i].co.z for i in poly.vertices]
+        # 只给 z < fh 的背面结构（限位框 / 柱）上色；面板底面 z=fh 保持浅灰，
+        # 否则整片背面都变橙，环与柱反而看不出来。
+        if min(vv) < P["tft_frame_h"] - 0.01:
+            poly.material_index = 1
+    saved6 = [(o, o.hide_render) for o in bpy.data.objects if o.type == 'MESH']
+    for o, _ in saved6:
+        o.hide_render = True
+    tdup.hide_render = False
+    scr.hide_render = True
+    bpy.ops.object.light_add(type='AREA', location=(0, 0, -60))
+    tft_under = bpy.context.object
+    tft_under.name = "RENDER_ONLY_tft_light"
+    tft_under.rotation_euler[0] = math.pi
+    tft_under.data.energy = 3200
+    tft_under.data.shape = 'DISK'
+    tft_under.data.size = 150
+    r_tft_back = render(os.path.join(RENDER_DIR, "11_tft_panel_back.png"),
+                        cam, (0, -6, -130), (0, 0, 2), ortho=100)
+    print("  RENDER tft back", r_tft_back)
+    bpy.data.objects.remove(tft_under, do_unlink=True)
+    for o, v in saved6:
+        o.hide_render = v
+    tdup_mesh = tdup.data
+    bpy.data.objects.remove(tdup, do_unlink=True)
+    bpy.data.meshes.remove(tdup_mesh)
+    bpy.data.objects.remove(scr, do_unlink=True)
+
     # 内部俯视：隐藏顶盖 / 电机 / 旋钮 / 地面
     hidden = [lid, knob, refs["motor"], refs["disc"], refs["shaft"],
               refs["encoder"], refs["pillars"], ground]
@@ -1306,9 +1459,10 @@ def main():
         o.location = loc
 
     # ---- 保存 .blend（装配状态）----
-    # STL 已按原点导出；这里把独立板摆到底盒旁边，打开 .blend 时能一眼看出
-    # 它不属于外壳，也不会和底盒 / 锁板在视口里叠在一起。
+    # STL 已按原点导出；这里把独立板 / TFT 面板摆到底盒两侧，打开 .blend 时能一眼看出
+    # 这两块都不属于外壳，也不会和底盒 / 锁板在视口里叠在一起。
     mini.location = Vector((P["mini_blend_x"], 0, 0))
+    tft.location = Vector((P["tft_blend_x"], 0, 0))
     aim(cam, (150, -170, 125), (0, 0, 34))
     blend_path = os.path.join(OUT, "Enclosure.blend")
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
@@ -1317,7 +1471,8 @@ def main():
     # ---- 报告 ----
     write_report(stl_report, blend_path,
                  (r_assembled, r_exploded, r_interior, r_fit, r_lip,
-                  r_lock, r_pocket, r_mini, r_mini_under))
+                  r_lock, r_pocket, r_mini, r_mini_under,
+                  r_tft, r_tft_back))
     print("=== ALL DONE ===")
 
 
@@ -1450,6 +1605,51 @@ def write_report(stl_report, blend_path, renders):
     A("  板底六角沉腔与四角安装孔见 render/09_standalone_underside.png（橙色为渲染标注色）；")
     A("  装配关系与 04 锁板完全相同，可对照 render/06_lock_plate.png 的爆炸示意。")
     A("")
+    pw, pd, pt = P["tft_panel_w"], P["tft_panel_d"], P["tft_panel_t"]
+    cl = P["tft_mod_clear"]
+    inner_w = P["tft_mod_w"] + 2 * cl
+    inner_d = P["tft_mod_h"] + 2 * cl
+    outer_w = inner_w + 2 * P["tft_frame_wall"]
+    outer_d = inner_d + 2 * P["tft_frame_wall"]
+    boss_cc = (pw / 2 - P["tft_panel_r"], pd / 2 - P["tft_panel_r"])
+    boss_wall = (P["tft_panel_r"]
+                 - math.hypot(P["tft_boss_x"] - boss_cc[0],
+                              P["tft_boss_y"] - boss_cc[1])
+                 - P["tft_boss_d"] / 2)
+    mount_wall_tft = pw / 2 - P["tft_mount_x"] - P["tft_mount_d"] / 2
+    usable = W / 2 - P["wall"] - P["motor_recess_d"] / 2
+    A("【06 TFT 显示面板 —— 1.83\" ST7789P3 / 240x284】（本次新增）")
+    A("  * 为什么不做进顶盖：顶盖中心 Ø%.1f 电机沉台到内腔壁的净宽只有 %.1f mm，"
+      % (P["motor_recess_d"], usable))
+    A("    小于 %.1f x %.1f mm 模组需要的 %.1f mm；强行开窗口会切进沉台、压住"
+      % (P["tft_mod_w"], P["tft_mod_h"], P["tft_mod_w"]))
+    A("    散热孔与螺柱沉头，还会破坏已复验通过的平齐口沿 / 四条让位唇边。")
+    A("    因此做成完全独立的第 6 个零件，与 01~05 没有任何装配关系。")
+    A("  面板 %.1f x %.1f x %.1f mm R%.1f，正面视窗 %.1f x %.1f（比可视区 30 x 35.5 略大，"
+      % (pw, pd, pt, P["tft_panel_r"], P["tft_win_w"], P["tft_win_h"]))
+    A("    不遮边缘像素），四周留 %.2f / %.2f mm 压边压住模组 PCB。"
+      % ((P["tft_mod_w"] - P["tft_win_w"]) / 2,
+         (P["tft_mod_h"] - P["tft_win_h"]) / 2))
+    A("  背面一圈限位框：内框 %.1f x %.1f（模组每边留 %.1f 间隙）、外框 %.1f x %.1f，"
+      % (inner_w, inner_d, cl, outer_w, outer_d))
+    A("    深 %.1f mm；下边留 %.1f mm 缺口给 8 根 SPI 排线走出。"
+      % (P["tft_frame_h"], P["tft_notch_w"]))
+    A("  4 个 Ø%.1f M2 自攻柱 (±%.1f, ±%.1f)，落在圆角圆心附近，最小壁厚 %.2f mm；"
+      % (P["tft_boss_d"], P["tft_boss_x"], P["tft_boss_y"], boss_wall))
+    A("    配 4 片小压片 + M2 螺钉压住 PCB 四角，也可直接点热熔胶 / 双面胶固定。")
+    A("  左右 2 个 Ø%.1f M3 安装孔 (±%.1f, 0)，孔外边距 %.2f mm："
+      % (P["tft_mount_d"], P["tft_mount_x"], mount_wall_tft))
+    A("    用 M3 螺钉把面板锁到外壳侧面、铝型材、台面支架或一块 L 型角板上，位置随意。")
+    A("  STL 以背面结构底面为 z=0 原点，包围盒 %.1f x %.1f x %.1f；"
+      % (pw, pd, P["tft_frame_h"] + pt))
+    A("    正面朝平台打印，限位框与柱朝上，无需支撑。")
+    A("  ★ %.1f x %.1f 是按 240x284 可视区推算的模组外框，不是实物量测值："
+      % (P["tft_mod_w"], P["tft_mod_h"]))
+    A("    到手先量 PCB 长宽与可视区，改 tft_mod_w / tft_mod_h / tft_win_w / tft_win_h，")
+    A("    再确认 8pin 排针位置是否对准下边缺口；改完跑 regen.bat，verify_fit.py 会自动复验。")
+    A("  正面视窗与屏幕位置见 render/10_tft_panel_front.png；背面限位框 / 柱 / 排线缺口")
+    A("    见 render/11_tft_panel_back.png（橙色为渲染标注色，打印件单色）。")
+    A("")
     A("【STL 自检】")
     total_bad = 0
     for fn, size, st in stl_report:
@@ -1477,6 +1677,9 @@ def write_report(stl_report, blend_path, renders):
     A("    用户说的「5*3.5」按 5 cm x 3.5 cm 理解；单位不同就改 P 里的 psu_w / psu_d。")
     A("  - 电源模块默认竖放（X 向 35 / Y 向 50）排在 +X 侧，靠近出线孔与开关。")
     A("  - 开关口默认 Ø%.1f 圆形拨动开关；用船型开关请把 sw_shape 改成 'rect' 并核对开孔尺寸。" % P["sw_d"])
+    A("  - ★ 06 TFT 面板：模组外框 %.1f x %.1f、可视区 %.1f x %.1f 都是按 1.83\" / 240x284"
+      % (P["tft_mod_w"], P["tft_mod_h"], P["tft_win_w"], P["tft_win_h"]))
+    A("    推算的估值，不是实物量测；屏幕到手先量再改 tft_* 参数。")
     A("")
     A("【五金 BOM】")
     A("  电源模块 5x3.5cm x1（12V 输入 -> 给 ESP32 与驱动板供电，线束从 +X Ø8 孔进出）")
@@ -1489,6 +1692,8 @@ def write_report(stl_report, blend_path, renders):
     A("                 若铜柱是内螺纹 standoff 则改 M3x10 螺钉 x4）")
     A("  【用 05 独立板】M3 六角螺母 x4（板底沉腔）+ M4x12 螺钉与螺母 x4")
     A("                 （四角 Ø%.1f 孔把板锁到平台；也可换 M3 + 垫片）" % P["mini_mount_d"])
+    A("  【用 06 TFT 面板】M2x6 螺钉 + 小压片 x4（压住屏幕 PCB 四角，")
+    A("                    或直接点热熔胶 / 贴双面胶）+ M3x12 螺钉与螺母 x2（左右安装孔）")
     A("  橡胶脚垫 Ø8 x4、少量热熔胶（固定线束）、扎带 x2")
     A("  USB-C 数据线 x1、12V 电源线 x1（从 +X 出线孔引出）")
     A("")
@@ -1498,6 +1703,9 @@ def write_report(stl_report, blend_path, renders):
     A("  04 锁板 / 05 独立板底面（六角沉腔面）朝下打印：沉腔上方是跨度 %.1f mm 的短桥，"
       "PLA 可直接桥接免支撑；若切片软件自动加支撑也很好拆。" % P["lock_nut_af"])
     A("  05 独立板平放打印即可（两面都是平面），是最容易打印的一个零件。")
+    A("  06 TFT 面板正面（视窗面）朝平台平放：背面限位框与 4 个 M2 柱朝上，无需支撑；")
+    A("     视窗四周最窄 %.2f mm 压边较薄，建议壁 3 圈、层高 0.16~0.2，防止薄边翘曲。"
+      % ((P["tft_mod_w"] - P["tft_win_w"]) / 2))
     A("  螺柱自攻孔 Ø2.6 若太紧可用 M3 丝锥或 3.0 钻头轻扩。")
     A("")
     A("【装配顺序】")
@@ -1519,20 +1727,33 @@ def write_report(stl_report, blend_path, renders):
     A("  拧紧锁死；3) 三相线 / 编码器线从 Ø9 线束孔引出；4) 四角 Ø4.2 孔用 M4")
     A("  螺钉把整块板锁到桌面、支架或铝型材上。板本身不依附外壳，位置随意。")
     A("")
+    A("【装 06 TFT 面板时】（与外壳零装配关系，随时可加）")
+    A("  1) 把屏幕模组从背面嵌进限位框，正面朝视窗，四周压边压住 PCB；8 根 SPI 线"
+      "从下边 %.1f mm 缺口引出。" % P["tft_notch_w"])
+    A("  2) 4 个 M2 柱上小压片 + M2 螺钉轻轻压住 PCB 四角（或直接点热熔胶 / 双面胶），"
+      "别压到排线和柔性 FPC。")
+    A("  3) 左右 2 个 Ø%.1f 孔用 M3 螺钉把面板锁到外壳侧面、台面 L 型角板或铝型材上；"
+      % P["tft_mount_d"])
+    A("     屏与旋钮的位置按自己顺手来定，这是独立件，改位置不用重打外壳。")
+    A("  4) 接线按 docs/06-tft-display.md：3V3 / GND / GPIO10~16，"
+      "先发 V 看四边白框，再按实物校准偏移 / 反色 / BGR。")
+    A("")
     A("【与固件的配合 / 安全】")
     A("  - 上电 initFOC() 会让电机正反各走一个电周期，务必让旋钮自由、别用手捏住。")
     A("  - 校准需 12V 与三相线都接好；失败会打印 Failed to notice movement 并卡住，按 RESET 重来。")
     A("  - 手扭住不放时电机持续堵转输出，MP6536 会发热，不用时发 T0 并断 12V。")
     A("  - 重烧固件前关闭上位机 / IDE 串口监视器，释放串口。")
-    A("  - 机械件共三套独立方案：MountBracket 三板支架 / 01~04 整机外壳 / 05 独立小方板，")
-    A("    按需要选一套打印即可；05 与外壳没有任何装配关系。")
+    A("  - 机械件共四套独立方案：MountBracket 三板支架 / 01~04 整机外壳 / 05 独立小方板 /")
+    A("    06 独立 TFT 显示面板，按需要选配打印；05 与 06 都不依附外壳。")
     A("")
     A("【渲染图】")
     for name, size in zip(("01_assembled.png", "02_exploded.png",
                            "03_interior.png", "04_fit.png", "05_lip.png",
                            "06_lock_plate.png", "07_lock_underside.png",
                            "08_standalone_plate.png",
-                           "09_standalone_underside.png"), renders):
+                           "09_standalone_underside.png",
+                           "10_tft_panel_front.png",
+                           "11_tft_panel_back.png"), renders):
         A("  render/%-20s %7d bytes" % (name, size))
     A("  源文件 %s (%d bytes)" % (os.path.basename(blend_path), os.path.getsize(blend_path)))
     A("")

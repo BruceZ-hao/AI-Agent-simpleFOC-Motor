@@ -2,7 +2,7 @@
 
 用 **ESP32-S3 DevKitC-1 + DengFOC-Mini（MP6536 版）+ AS5600 + 云台无刷电机**，做一颗「用手扭开、松手立刻弹回原点」的触觉旋钮。
 
-整个项目由对话式 AI 辅助从零搭建，包含：**可烧录固件**、**1.83" TFT 本地仪表盘**、**本地 Web 上位机**、**三套可 3D 打印的机械方案**（开放式台架 / Blender 参数化整机外壳 / 一块独立电机小方板），以及从接线、校准到排坑的完整文档。
+整个项目由对话式 AI 辅助从零搭建，包含：**可烧录固件**、**1.83" TFT 本地仪表盘**、**本地 Web 上位机**、**四套可 3D 打印的机械方案**（开放式台架 / Blender 参数化整机外壳 / 一块独立电机小方板 / 一块独立 TFT 显示面板），以及从接线、校准到排坑的完整文档。
 
 ![整机外壳渲染](Enclosure/render/01_assembled.png)
 
@@ -16,7 +16,7 @@
 | 实时调参 | 串口 `K/B/Z/H/G/J` 与上位机滑块都可热调，不用重新编译 |
 | Web 上位机 | 零第三方依赖，实时角度 / Uq 曲线、圆盘指针、参数滑块、串口日志 |
 | TFT 仪表盘 | 1.83" ST7789P3 240×284，模式 / 角度大字 / 表盘指针 / 力矩条 / 6 行状态；零图形库依赖，刷屏钉在 core 0 不打扰 FOC |
-| 机械件 | 5 个 STL 的开放式台架 + 5 个 STL 的 Blender 方案（整机外壳 4 件 + 独立电机小方板 1 件），全部水密可直接切片 |
+| 机械件 | 5 个 STL 的开放式台架 + 6 个 STL 的 Blender 方案（整机外壳 4 件 + 独立电机小方板 1 件 + 独立 TFT 显示面板 1 件），全部水密可直接切片 |
 | 一键烧录 | 附带 4MB 合并镜像与 `.bat` 脚本，无需打开 Arduino IDE |
 
 ## 硬件清单
@@ -102,12 +102,13 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 ### 4. 装机械件
 
 - **开放式台架**：`MountBracket/stl/` 5 个 STL，三块板 + 4 根 M3 长螺杆，AS5600 气隙靠螺母微调。
-- **整机外壳**：`Enclosure/stl/` 的 `01~04` 四个 STL（底盒 / 顶盖 / 滚花旋钮 / **电机锁板**），`Enclosure/render/` 有装配、爆炸、内部俯视、结合细节、唇边特写、锁板爆炸、锁板底面仰视七张渲染图。底盒是**完整平底、无板卡槽**——三块板排针朝下直接堆放，并带 50×35mm 电源模块位置与侧边电源开关口。顶盖与底盒共用同一圆角轮廓，盒口是平齐口沿，四角螺柱顶面与口沿共面承托顶盖；顶盖下方四条直唇边插入内腔定位、四角给螺柱让位。`Enclosure/verify_fit.py` 把这些配合关系做成了自动检查。
+- **整机外壳**：`Enclosure/stl/` 的 `01~04` 四个 STL（底盒 / 顶盖 / 滚花旋钮 / **电机锁板**），`Enclosure/render/` 有装配、爆炸、内部俯视、结合细节、唇边特写、锁板爆炸、锁板底面仰视、独立板正反面、TFT 面板正反面共 11 张渲染图。底盒是**完整平底、无板卡槽**——三块板排针朝下直接堆放，并带 50×35mm 电源模块位置与侧边电源开关口。顶盖与底盒共用同一圆角轮廓，盒口是平齐口沿，四角螺柱顶面与口沿共面承托顶盖；顶盖下方四条直唇边插入内腔定位、四角给螺柱让位。`Enclosure/verify_fit.py` 把这些配合关系做成了自动检查。
 - **独立电机小方板（只想固定电机时用这个）**：`Enclosure/stl/05_standalone_motor_plate.stl`，**完全脱离外壳**的一块 60×60×5mm 平板，两面全平、免支撑，单独打印这一块即可。四角 4 个 Ø4.2 安装孔把板锁到桌面/支架，中心 Ø12 让位孔、Ø9 线束孔。`render/08_standalone_plate.png` / `09_standalone_underside.png` 是它的顶面孔位与底面沉腔特写。
+- **独立 TFT 显示面板（装屏用这个）**：`Enclosure/stl/06_tft_panel.stl`，54×56×3mm，正面 30.5×36 视窗、背面模组限位框 + 4 个 M2 压片柱 + 下边排线缺口，左右 2 个 M3 孔把面板锁到外壳侧面 / 支架 / 台面。**没有改现有顶盖**：顶盖中心 Ø42 电机沉台右侧净宽只有 31.6mm，放不下 35×42mm 模组，硬开会切进沉台并破坏刚修好的结合面。`render/10_tft_panel_front.png` / `11_tft_panel_back.png` 是正反面特写，接线与校准见 [06-tft-display.md](docs/06-tft-display.md) 第 8 节。
 
   **电机怎么固定**：`02_top_cover.stl` 的 4 条径向长槽只是给电机底部 4 根铜柱让位（能滑动）。要真正锁死，有两条路：① 做整机外壳时改打印 `04_motor_lock_plate.stl`（与顶盖**二选一**）；② 不做外壳时直接打印 `05_standalone_motor_plate.stl`。两者都是 4 个精确 Ø3.4 孔 + 板底六角螺母沉腔，M3 螺母嵌在腔里不转，铜柱从上穿过拧紧后电机与板成为一体；区别只在板本身要不要装进外壳。孔距默认 `lock_post_r=14mm`（估算），**打印前量对角两根铜柱中心距 L，把 `lock_post_r` 改成 L/2**，或临时把 `lock_hole_mode` 设成 `"slot"` 免实测。改独立板尺寸要同步改 `mini_mount_x / mini_mount_y`。详见 [04-mechanics.md](docs/04-mechanics.md)。
 
-三套机械方案互相独立，按需选一套打印即可。尺寸按标准值与实物照片估算，**打印前务必实测并改参数区**（`MountBracket/bracket.py` 顶部 / `Enclosure/enclosure.py` 的 `P` 字典），然后双击各自的 `regen.bat` 重新导出。
+四套机械方案互相独立，按需选配打印即可。尺寸按标准值与实物照片估算，**打印前务必实测并改参数区**（`MountBracket/bracket.py` 顶部 / `Enclosure/enclosure.py` 的 `P` 字典），然后双击各自的 `regen.bat` 重新导出。
 
 ## 串口命令
 
@@ -157,7 +158,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 ├── ESP32S3_Blink/                点灯 / 串口 / 烧录链路的最小验证工程
 ├── HapticConsole/              ★ 本地 Web 上位机（server.py + index.html + start.bat）
 ├── MountBracket/                 开放式三板台架（bracket.py + 5 STL + 装配图）
-├── Enclosure/                  ★ Blender 机械件（enclosure.py + .blend + 5 STL + 9 渲染 + verify_fit.py）
+├── Enclosure/                  ★ Blender 机械件（enclosure.py + .blend + 6 STL + 11 渲染 + verify_fit.py）
 ├── docs/                         接线、固件、上位机、机械、排坑、TFT 六篇文档
 └── README.md / LICENSE / .gitignore / .gitattributes
 ```
@@ -171,9 +172,9 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 | [01-wiring.md](docs/01-wiring.md) | S3 / C3 接线表、电源与共地、VCC 脚判别、MP6536 电气要点 |
 | [02-firmware.md](docs/02-firmware.md) | 三个 STAGE、校准流程、弹簧回中与静音刹车的原理、命令与参数 |
 | [03-console.md](docs/03-console.md) | 上位机启动、HTTP 接口、SSE 遥测、串口占用处理 |
-| [04-mechanics.md](docs/04-mechanics.md) | 三套机械方案（台架 / 整机外壳 / 独立电机小方板）、STL 清单、参数区、五金 BOM 与打印建议 |
+| [04-mechanics.md](docs/04-mechanics.md) | 四套机械方案（台架 / 整机外壳 / 独立电机小方板 / 独立 TFT 面板）、STL 清单、参数区、五金 BOM 与打印建议 |
 | [05-troubleshooting.md](docs/05-troubleshooting.md) | 实际踩过的坑与对应解法（CDC、错误 31、waiting for download、抖动等） |
-| [06-tft-display.md](docs/06-tft-display.md) | 1.83" ST7789P3 240×284 接线、零依赖驱动、STAGE 0 自检、偏移/反色/RGB 校准、双核刷屏架构 |
+| [06-tft-display.md](docs/06-tft-display.md) | 1.83" ST7789P3 240×284 接线、零依赖驱动、STAGE 0 自检、偏移/反色/RGB 校准、双核刷屏架构、06 显示面板机械安装 |
 
 ## 安全边界
 

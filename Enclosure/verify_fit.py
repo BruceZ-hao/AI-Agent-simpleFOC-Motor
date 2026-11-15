@@ -97,6 +97,27 @@ def hole_radius(segs, cx, cy, lo=0.8, hi=4.0):
     return ds[len(ds) // 2]
 
 
+def wall_coverage(segs, axis, val, tol=0.15):
+    """截面上位于 axis=val 的直墙总长度（矩形窗口 / 限位框的边界）。"""
+    total = 0.0
+    for (x0, y0), (x1, y1) in segs:
+        a0, a1 = (x0, x1) if axis == 'x' else (y0, y1)
+        b0, b1 = (y0, y1) if axis == 'x' else (x0, x1)
+        if abs(a0 - val) < tol and abs(a1 - val) < tol:
+            total += abs(b1 - b0)
+    return total
+
+
+def segs_in_region(segs, xr, yr):
+    """完全落在指定 XY 小矩形内的截面线段数（用于验证排线缺口真的打通）。"""
+    n = 0
+    for (x0, y0), (x1, y1) in segs:
+        if (all(xr[0] < x < xr[1] for x in (x0, x1))
+                and all(yr[0] < y < yr[1] for y in (y0, y1))):
+            n += 1
+    return n
+
+
 def main():
     P = load_params()
     W, D, H = P["case_w"], P["case_d"], P["case_h"]
@@ -290,8 +311,86 @@ def main():
         chk("05_standalone_motor_plate.stl 存在", False,
             "未找到独立板 STL，请先跑 regen.bat")
 
+    # ---- 06 TFT 显示面板（与外壳完全无关的独立件）----
+    tft_path = os.path.join(HERE, "stl", "06_tft_panel.stl")
+    if os.path.exists(tft_path):
+        tft = read_stl(tft_path)
+        pw, pd, pt = P["tft_panel_w"], P["tft_panel_d"], P["tft_panel_t"]
+        fh = P["tft_frame_h"]
+        cl = P["tft_mod_clear"]
+        iw, idp = P["tft_mod_w"] + 2 * cl, P["tft_mod_h"] + 2 * cl
+        ow, od = iw + 2 * P["tft_frame_wall"], idp + 2 * P["tft_frame_wall"]
+        ww, wh = P["tft_win_w"], P["tft_win_h"]
+        face = segments(tft, fh + pt / 2)     # 面板本体（视窗 / 安装孔）
+        back = segments(tft, 0.5)             # 背面限位框 / M2 柱
+        fbb = bbox(face)
+        chk("TFT 面板在 z=fh+t/2 有实体", bool(face),
+            "截面线段 %d 条" % len(face))
+        if fbb:
+            chk("TFT 面板外形 %.1f x %.1f（不沿用外壳轮廓）" % (pw, pd),
+                abs(fbb[1] - pw / 2) < tol and abs(fbb[3] - pd / 2) < tol,
+                "实测 X±%.2f / Y±%.2f" % (fbb[1], fbb[3]))
+        chk("背面结构底面 z=0 平齐，下方无材料", not segments(tft, -0.5),
+            "z=-0.5 截面线段 %d 条" % len(segments(tft, -0.5)))
+        chk("面板顶面 z=%.1f 以上无材料" % (fh + pt), not segments(tft, fh + pt + 0.5),
+            "z=%.1f 截面线段 %d 条"
+            % (fh + pt + 0.5, len(segments(tft, fh + pt + 0.5))))
+        wx = min(wall_coverage(face, 'x', ww / 2),
+                 wall_coverage(face, 'x', -ww / 2))
+        wy = min(wall_coverage(face, 'y', wh / 2),
+                 wall_coverage(face, 'y', -wh / 2))
+        chk("正面视窗 %.1f x %.1f 四边贯通" % (ww, wh),
+            wx > wh * 0.85 and wy > ww * 0.85,
+            "X 向墙 %.1f / Y 向墙 %.1f mm" % (wx, wy))
+        press_x = (P["tft_mod_w"] - ww) / 2
+        press_y = (P["tft_mod_h"] - wh) / 2
+        chk("视窗四周压边压住模组 PCB", press_x > 1.5 and press_y > 1.5
+            and ww < iw and wh < idp,
+            "X %.2f / Y %.2f mm，内框 %.1f x %.1f" % (press_x, press_y, iw, idp))
+        frame_x = min(wall_coverage(back, 'x', ow / 2),
+                      wall_coverage(back, 'x', -ow / 2),
+                      wall_coverage(back, 'x', iw / 2),
+                      wall_coverage(back, 'x', -iw / 2))
+        chk("背面限位框内外墙完整（内 %.1f 外 %.1f）" % (iw, ow),
+            frame_x > 25.0, "最矮一侧墙长 %.1f mm" % frame_x)
+        notch_in = segs_in_region(back, (-P["tft_notch_w"] / 2 + 1.0,
+                                         P["tft_notch_w"] / 2 - 1.0),
+                                  (P["tft_notch_y"] - 1.0,
+                                   P["tft_notch_y"] + 1.0))
+        chk("下边 %.1f mm 排线缺口真的打通" % P["tft_notch_w"], notch_in == 0,
+            "缺口区域残留线段 %d 条" % notch_in)
+        br = [hole_radius(back, sx * P["tft_boss_x"], sy * P["tft_boss_y"],
+                          lo=0.4, hi=1.3)
+              for sx in (-1, 1) for sy in (-1, 1)]
+        chk("4 个 M2 自攻柱盲孔 Ø%.1f" % P["tft_boss_hole_d"],
+            all(r is not None and abs(r - P["tft_boss_hole_d"] / 2) < 0.15
+                for r in br),
+            "实测半径 %s" % ", ".join("%.2f" % r if r else "NONE" for r in br))
+        mr = [hole_radius(face, sx * P["tft_mount_x"], 0.0, lo=1.0, hi=2.6)
+              for sx in (-1, 1)]
+        chk("左右 2 个 M3 安装孔 Ø%.1f 贯通" % P["tft_mount_d"],
+            all(r is not None and abs(r - P["tft_mount_d"] / 2) < 0.15
+                for r in mr),
+            "实测半径 %s" % ", ".join("%.2f" % r if r else "NONE" for r in mr))
+        cc = (pw / 2 - P["tft_panel_r"], pd / 2 - P["tft_panel_r"])
+        bwall = (P["tft_panel_r"]
+                 - math.hypot(P["tft_boss_x"] - cc[0], P["tft_boss_y"] - cc[1])
+                 - P["tft_boss_d"] / 2)
+        chk("4 个柱不切穿圆角板边", bwall > 0.8,
+            "最小壁厚 %.2f mm > 0.8 mm" % bwall)
+        mwall = pw / 2 - P["tft_mount_x"] - P["tft_mount_d"] / 2
+        chk("M3 安装孔距板边足够", mwall > 1.5,
+            "孔外边距 %.2f mm > 1.5 mm" % mwall)
+        clear_x = (P["tft_boss_x"] - P["tft_boss_d"] / 2) - ow / 2
+        clear_y = (P["tft_boss_y"] - P["tft_boss_d"] / 2) - od / 2
+        chk("M2 柱与限位框不干涉", clear_x > 0 and clear_y > 0,
+            "X 净距 %.2f / Y 净距 %.2f mm" % (clear_x, clear_y))
+    else:
+        chk("06_tft_panel.stl 存在", False,
+            "未找到 TFT 面板 STL，请先跑 regen.bat")
+
     print("=" * 74)
-    print(" 顶盖 / 底盒 / 电机锁板 / 独立小方板 配合校验")
+    print(" 顶盖 / 底盒 / 电机锁板 / 独立小方板 / TFT 面板 配合校验")
     print("=" * 74)
     for name, ok, detail in checks:
         print("  [%s] %-38s %s" % ("PASS" if ok else "FAIL", name, detail))
