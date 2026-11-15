@@ -2,7 +2,7 @@
 
 用 **ESP32-S3 DevKitC-1 + DengFOC-Mini（MP6536 版）+ AS5600 + 云台无刷电机**，做一颗「用手扭开、松手立刻弹回原点」的触觉旋钮。
 
-整个项目由对话式 AI 辅助从零搭建，包含：**可烧录固件**、**本地 Web 上位机**、**三套可 3D 打印的机械方案**（开放式台架 / Blender 参数化整机外壳 / 一块独立电机小方板），以及从接线、校准到排坑的完整文档。
+整个项目由对话式 AI 辅助从零搭建，包含：**可烧录固件**、**1.83" TFT 本地仪表盘**、**本地 Web 上位机**、**三套可 3D 打印的机械方案**（开放式台架 / Blender 参数化整机外壳 / 一块独立电机小方板），以及从接线、校准到排坑的完整文档。
 
 ![整机外壳渲染](Enclosure/render/01_assembled.png)
 
@@ -10,11 +10,12 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 三步验证 | `STAGE 1` 验 AS5600 → `STAGE 2` 开环试转 → `STAGE 3` 闭环 FOC，每步只改一个宏 |
+| 三步验证 | `STAGE 0` 只测 TFT → `STAGE 1` 验 AS5600 → `STAGE 2` 开环试转 → `STAGE 3` 闭环 FOC，每步只改一个宏 |
 | 弹簧回中 | 默认 `M1`，手扭开松手即弹回上电原点；单环 PD + 原点死区，静止时完全不抖 |
 | 静音刹车 | 速度环 `T0` 停止时绕开 PID 积分噪声，用纯阻尼电刹车滑停（`S1` 默认开启） |
 | 实时调参 | 串口 `K/B/Z/H/G/J` 与上位机滑块都可热调，不用重新编译 |
 | Web 上位机 | 零第三方依赖，实时角度 / Uq 曲线、圆盘指针、参数滑块、串口日志 |
+| TFT 仪表盘 | 1.83" ST7789P3 240×284，模式 / 角度大字 / 表盘指针 / 力矩条 / 6 行状态；零图形库依赖，刷屏钉在 core 0 不打扰 FOC |
 | 机械件 | 5 个 STL 的开放式台架 + 5 个 STL 的 Blender 方案（整机外壳 4 件 + 独立电机小方板 1 件），全部水密可直接切片 |
 | 一键烧录 | 附带 4MB 合并镜像与 `.bat` 脚本，无需打开 Arduino IDE |
 
@@ -27,6 +28,7 @@
 - 电源：**12V / 限流 1A**，VIN 端并联 470µF；ESP32 由原生 USB 口单独供电
 - 电源模块：**5×3.5cm（50×35mm）**，与 ESP32、DengFOCmini 一起排针朝下平放在壳内
 - 电源开关：外壳 +X 侧壁预留 Ø6.5mm 开孔（可切换成船型开关矩形口），串在 12V 正极上
+- 显示屏（可选）：**1.83" IPS TFT / ST7789P3 / 240×284 / 4 线 SPI 8 针**，3.3V 供电
 - 其他：杜邦线、共地线、M3 螺钉螺母、AS5600 与板卡固定件
 
 > ⚠️ 5.5A 是芯片内部逐周期**峰值**限流，不是可持续电流。相电流 ≈ `voltage_limit / 相阻`，换低阻电机前先量相阻并下调 `V_LIMIT`，详见 [安全边界](#安全边界)。
@@ -44,6 +46,8 @@
 | 3V3 | AS5600 VCC | 只接 3.3V，别接 5V |
 | GND | 驱动板 GND + AS5600 GND | **必须共地** |
 | VIN / GND | 外部 12V | 电机三相接 M1/M2/M3 |
+
+**可选 1.83" TFT**（8 针 `GND VCC SCL SDA RES DC CS BLK`）：`VCC→3V3`、`GND→GND`、`SCL→GPIO12`、`SDA→GPIO11`、`RES→GPIO15`、`DC→GPIO14`、`CS→GPIO10`、`BLK→GPIO16`（或直接 3V3 常亮）。屏只写不读，没有 MISO 线。`10~16` 全部空闲，接屏不用改上面任何一根线；第一次接线请先用 `STAGE 0` 只测屏，详见 [06-tft-display.md](docs/06-tft-display.md)。
 
 S3 引脚禁区：`GPIO0/3/45/46`（strapping）、`19/20`（原生 USB）、`26~37`（Flash/PSRAM）、`43/44`（UART0）、`48`（板载 RGB）。本例用的 4~9 全是安全普通 GPIO。ESP32-C3 的接线**完全不同**，见 `docs/01-wiring.md`。
 
@@ -76,6 +80,17 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 ```
 
 `PP check` 若报 `estimated pp: N`，把 `.ino` 的 `POLE_PAIRS` 改成 N 重新编译。
+
+### 2.5 加一块 TFT 屏（可选）
+
+不用装任何图形库：固件自带 `TFT_ST7789P3.h`（SPI 驱动）和 `TFT_UI.h`（仪表盘），只依赖 Arduino 自带的 `SPI.h`。`USE_TFT` 改成 `0` 即可完全退回纯串口固件。
+
+1. 按上表接好 8 根线，**先不要上 12V 电机电源**。
+2. `.ino` 里改 `#define STAGE 0`，用 Arduino IDE 编译上传。这一步**完全不初始化 Wire / driver / motor**，屏幕显示开机画面后进入测试图。
+3. 串口发 `V` 看四边 1px 白框是否完整、彩条是否正确；缺边发 `O0,20`（或 `O0,36`），红蓝反发 `C`，黑白反发 `I`，背光不亮发 `N`。
+4. 把校准值写回 `TFT_COL_OFS / TFT_ROW_OFS / TFT_INVERT / TFT_BGR`，改回 `#define STAGE 3` 重新编译，仪表盘就随电机状态实时刷新。
+
+刷屏任务钉在 **core 0**，`loopFOC()` 在 core 1，所以显示不会拖慢电流环。完整说明见 [06-tft-display.md](docs/06-tft-display.md)。
 
 ### 3. 玩起来
 
@@ -111,24 +126,31 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 | `G<值>` | 静音刹车阻尼 [V/(rad/s)] |
 | `J<值>` | 零速速度死区 [rad/s] |
 | `D` | 打印诊断：`target / shaft / err / vel / Uq / Ua,Ub,Uc / AS5600 angle / GPIO duty` |
+| `V` | TFT 测试图开关（四边白框 + 彩条 + 四角定位块） |
+| `I` / `C` | TFT 反色 INVON/INVOFF 切换 / RGB-BGR 顺序切换 |
+| `N` | TFT 背光开关 |
+| `O<col>,<row>` | TFT 显存偏移，例如 `O0,20`（画面整体错位时用） |
 
 ## 关键参数（`.ino` 顶部「只改这一区」）
 
 ```cpp
-#define STAGE        3      // 1=传感器自检 2=开环 3=闭环FOC
+#define STAGE        3      // 0=只测TFT 1=传感器 2=开环 3=闭环FOC
+#define USE_TFT      1      // 0=不编译显示代码，退回纯串口固件
 #define POLE_PAIRS   7
 #define V_SUPPLY     12.0f  // MP6536 版只允许 5~24V
 #define V_LIMIT      3.0f   // 实测 1V 带不动、3V 才转
 #define PHASE_R      10.0f  // 万用表量任意两相 ÷2
 // 弹簧：Kp 8.0 / Kd 0.20 / 死区 0.012 / 速度低通 0.05s / 下采样 3
+// TFT：GPIO 12/11/10/14/15/16，20MHz，240x284，偏移 0/0，20 FPS @ core 0
 ```
 
 ## 目录结构
 
 ```
 .
-├── ESP32S3_SimpleFOC_AS5600/   ★ 主固件（S3 + STAGE 3 + 弹簧回中 + 静音刹车）
+├── ESP32S3_SimpleFOC_AS5600/   ★ 主固件（S3 + STAGE 3 + 弹簧回中 + 静音刹车 + TFT 仪表盘）
 │   ├── ESP32S3_SimpleFOC_AS5600.ino
+│   ├── TFT_ST7789P3.h / TFT_UI.h       # 零依赖 SPI 驱动 + 240x284 仪表盘
 │   ├── ESP32S3_SimpleFOC_AS5600.merged.bin   # 4MB 免编译镜像
 │   ├── flash_and_run.bat / spin_test.ps1 / spin_test.bat
 ├── ESP32C3_SimpleFOC_AS5600/     C3 早期版本（历史存档，接线与 S3 不同）
@@ -136,7 +158,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 ├── HapticConsole/              ★ 本地 Web 上位机（server.py + index.html + start.bat）
 ├── MountBracket/                 开放式三板台架（bracket.py + 5 STL + 装配图）
 ├── Enclosure/                  ★ Blender 机械件（enclosure.py + .blend + 5 STL + 9 渲染 + verify_fit.py）
-├── docs/                         接线、固件、上位机、机械、排坑五篇文档
+├── docs/                         接线、固件、上位机、机械、排坑、TFT 六篇文档
 └── README.md / LICENSE / .gitignore / .gitattributes
 ```
 
@@ -151,6 +173,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 | [03-console.md](docs/03-console.md) | 上位机启动、HTTP 接口、SSE 遥测、串口占用处理 |
 | [04-mechanics.md](docs/04-mechanics.md) | 三套机械方案（台架 / 整机外壳 / 独立电机小方板）、STL 清单、参数区、五金 BOM 与打印建议 |
 | [05-troubleshooting.md](docs/05-troubleshooting.md) | 实际踩过的坑与对应解法（CDC、错误 31、waiting for download、抖动等） |
+| [06-tft-display.md](docs/06-tft-display.md) | 1.83" ST7789P3 240×284 接线、零依赖驱动、STAGE 0 自检、偏移/反色/RGB 校准、双核刷屏架构 |
 
 ## 安全边界
 
@@ -161,6 +184,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 5. 重烧固件前先释放串口（关 IDE 监视器、上位机点「断开」）；长时间不用请断 12V。
 6. 3D 打印件尺寸含按标准值/照片估算的部分，打印前实测电机、板卡、支撑柱、电源模块与 USB-C / 开关开孔位置；**电机锁板 / 独立小方板的 4 孔孔距尤其要实测**，照片无法给出精确尺寸；独立板 60×60 是自定义尺寸，改边长要同步改四角安装孔坐标。
 7. 加电源模块与侧壁开关后，12V 正极先经开关再进模块，输出按实物分给驱动板 VIN 与 ESP32；模块输出电压与极性务必核对，全部共地。
+8. TFT 是 **3.3V 逻辑**，除非模块明确标注带 LDO / 电平转换并支持 5V，否则 `VCC` 只接 3V3；屏 GND 必须与驱动板、AS5600 共地。屏幕与电机共用 USB CDC 串口，重烧前记得释放串口。
 
 ## 许可
 

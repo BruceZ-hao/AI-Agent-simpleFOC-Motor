@@ -4,7 +4,8 @@
  *
  * 由 ESP32-C3 版移植而来，参数与调试流程不变，只换了主控引脚与 PWM 后端。
  *
- * 用法：按 STAGE 分三步验证，每步只改一个数字，编译上传，串口 115200 观察。
+ * 用法：按 STAGE 分步验证，每步只改一个数字，编译上传，串口 115200 观察。
+ *   STAGE 0  只测 1.83" TFT：不初始化电机/驱动/编码器，纯屏幕自检
  *   STAGE 1  只测 AS5600：手转电机轴，角度应在 0 ~ 6.28 rad 之间线性变化
  *   STAGE 2  开环速度：不依赖编码器，发 T6.28 应该正好 1 圈/秒
  *   STAGE 3  闭环 FOC：上电 initFOC 自动对齐（务必让轴空转！），
@@ -90,11 +91,31 @@
  *   本版已接管这颗灯，用状态指示消除歧义：
  *     待机(target=0)  → 每 1.5s 短闪 80ms（心跳，证明程序在跑）
  *     有目标速度      → 常亮（表示正在驱动电机）
+ * === 扩展：1.83" TFT / ST7789P3 / 240x284 / 4 线 SPI ===
+ * 8 针模块：GND VCC SCL SDA RES DC CS BLK（没有 MISO）。
+ *   GPIO12 SCL / GPIO11 SDA / GPIO10 CS / GPIO14 DC / GPIO15 RES / GPIO16 BLK
+ *   3V3 + GND 供电。10~16 全部空闲，不与电机 4~7、AS5600 8/9 冲突。
+ * 刷屏是阻塞式 SPI 传输，绝不能放进 loop() 打断 loopFOC()，因此显示单独
+ * 钉在 core 0 的 FreeRTOS 任务里，loop() 只写一个 DisplayState 快照。
+ * 驱动零依赖（TFT_ST7789P3.h），不用装 TFT_eSPI / Arduino_GFX。
+ * 屏幕校准：STAGE 0 = 只测屏（完全不初始化电机）；运行时命令
+ *   V 测试图 / I 反色 / C RGB-BGR / N 背光 / O<col>,<row> 显存偏移。
+ * 把 USE_TFT 改成 0 即可完全退回原来的纯串口固件。
  */
+
+/* 显示扩展总开关：0 = 不编译任何 TFT 代码，1 = 启用仪表盘 */
+#define USE_TFT      1
 
 #include <Arduino.h>
 #include <Wire.h>
 #include <SimpleFOC.h>
+#if USE_TFT
+#include <SPI.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include "TFT_ST7789P3.h"
+#include "TFT_UI.h"
+#endif
 
 /* 编译期防呆：S3 DevKitC-1 走原生 USB Serial/JTAG。若 Arduino IDE 里
  * 「工具 -> USB CDC On Boot」没设成 Enabled，Serial 会跑到 UART0(GPIO43/44)，
@@ -105,7 +126,7 @@
 #endif
 
 /* ==================== 0. 只改这一区 ==================== */
-#define STAGE        3      // 1=传感器自检  2=开环转动  3=闭环FOC
+#define STAGE        3      // 0=只测TFT(不碰电机) 1=传感器 2=开环 3=闭环FOC
 #define POLE_PAIRS   7      // 极对数：2208/2804 云台电机常见 7，看串口 PP check 结果校准
 #define V_SUPPLY     12.0f  // VIN/VM 实测电压 [V]，MP6536 版只允许 5~24V
 #define V_LIMIT      3.0f   // 电压限幅 [V]：STAGE 2 实测 1V 带不动、3V 才转，故闭环默认 3V
@@ -166,7 +187,32 @@ static_assert(V_LIMIT / PHASE_R < 5.5f,
 #define PIN_EN       7      // EN
 #define PIN_SDA      8      // AS5600 SDA（S3 默认硬件 I2C）
 #define PIN_SCL      9      // AS5600 SCL
+
+/* === 1.83" TFT / ST7789P3 / 240x284 / 4 线 SPI ===
+ * 8 针：GND VCC SCL SDA RES DC CS BLK（屏幕不回读，MISO 只是占一个空闲脚）
+ * 12/11/13/10 正好是 esp32 core 给 S3 定义的默认 SCK/MOSI/MISO/SS，
+ * 走默认 FSPI 时序最稳；10~16 全部避开了电机 4~7、I2C 8/9 与 S3 引脚禁区。
+ */
+#define TFT_SCK      12
+#define TFT_MOSI     11
+#define TFT_MISO     13
+#define TFT_CS       10
+#define TFT_DC       14
+#define TFT_RST      15
+#define TFT_BL       16     // PWM 背光；不需要调光可直接把 BLK 接 3V3
+#define TFT_SPI_HZ   20000000   // 杜邦线先 20MHz；短线稳定后可试 40000000
+#define TFT_W        240
+#define TFT_H        284
+#define TFT_COL_OFS  0      // 画面整体偏移时改这里，或运行时发 O<col>,<row>
+#define TFT_ROW_OFS  0
+#define TFT_INVERT   1      // IPS 模组多数需 INVON；黑白反了发 I 切换
+#define TFT_BGR      1      // 红蓝互换发 C 切换
+#define TFT_FPS_MS   50     // 20 FPS，刷新全部在 core 0
 /* ==================================================== */
+
+#if STAGE == 0 && !USE_TFT
+#error "STAGE 0 (TFT self-test) requires USE_TFT = 1"
+#endif
 
 MagneticSensorI2C sensor = MagneticSensorI2C(AS5600_I2C);
 BLDCMotor motor = BLDCMotor(POLE_PAIRS);
@@ -185,6 +231,41 @@ bool  velSilent = true;     // S1/S0：速度环零速静音刹车开关
 float brakeKd  = VEL_BRAKE_KD;  // 停车阻尼，G 命令实时调
 float brakeDb  = VEL_BRAKE_DB;  // 速度死区，J 命令实时调
 float brakeUq  = 0.0f;      // 最近一次电刹车输出 [V]
+
+#if USE_TFT
+/* loop() 写、显示任务读的快照；全部为 32 位以内标量，双核读写无需加锁 */
+DisplayState dispState;
+TFTDashboard dashboard(&dispState, TFT_SCK, TFT_MOSI, TFT_MISO,
+                       TFT_CS, TFT_DC, TFT_RST, TFT_BL);
+
+/* 显示任务钉在 core 0。loop()/loopFOC() 跑 core 1，SPI 阻塞传输不会
+ * 打断电流环；优先级 1 与 loopTask 同级，不会饿死系统服务。 */
+void tftTask(void*) {
+  for (;;) {
+    dashboard.renderFrame();
+    vTaskDelay(pdMS_TO_TICKS(TFT_FPS_MS));
+  }
+}
+
+/* 显示命令只置标志位，真正的 SPI 操作由 core 0 在帧首统一执行，
+ * 避免 core 1 的命令回调和刷屏任务同时抢 SPI 总线。 */
+void doTftTest(char*)   { dashboard.request(TFT_REQ_TEST);      Serial.println(F("TFT: test pattern toggle")); }
+void doTftInvert(char*) { dashboard.request(TFT_REQ_INVERT);    Serial.println(F("TFT: invert toggle")); }
+void doTftBGR(char*)    { dashboard.request(TFT_REQ_BGR);       Serial.println(F("TFT: RGB/BGR toggle")); }
+void doTftBL(char*)     { dashboard.request(TFT_REQ_BACKLIGHT); Serial.println(F("TFT: backlight toggle")); }
+void doTftOffset(char* cmd) {
+  int x = 0, y = 0;
+  if (sscanf(cmd, "%d,%d", &x, &y) == 2) {
+    if (x < 0) x = 0;  if (x > 80) x = 80;
+    if (y < 0) y = 0;  if (y > 80) y = 80;
+    dashboard.requestOffsets((uint8_t)x, (uint8_t)y);
+    Serial.print(F("TFT: offset = ")); Serial.print(x);
+    Serial.print(F(",")); Serial.println(y);
+  } else {
+    Serial.println(F("Usage: O<col>,<row>   e.g. O0,20"));
+  }
+}
+#endif
 
 /* ==================== 弹簧回中（触觉旋钮）====================
  * torque + voltage 模式下 move(uq) 会让 current_sp = uq，loopFOC() 里
@@ -407,6 +488,18 @@ void printConfig() {
   Serial.println(F("Haptic v2: single-loop PD + deadband. M1/M0, K stiffness, B damping,"));
   Serial.println(F("           Z deadband, H re-zero. If buzzing at home, try Z0.03 / B0.10."));
   Serial.println(F("Velocity idle: silent brake S1/S0, G<damping>, J<speed deadband>; T0 quiet."));
+#if USE_TFT
+  Serial.print(F("TFT ST7789P3 ")); Serial.print(TFT_W);
+  Serial.print(F("x")); Serial.print(TFT_H);
+  Serial.print(F(" @ ")); Serial.print(TFT_SPI_HZ / 1000000);
+  Serial.println(F(" MHz, dashboard on core 0"));
+  Serial.print(F("TFT GPIO SCK/MOSI/CS/DC/RST/BL = "));
+  Serial.print(TFT_SCK); Serial.print(F("/")); Serial.print(TFT_MOSI);
+  Serial.print(F("/"));  Serial.print(TFT_CS);  Serial.print(F("/"));
+  Serial.print(TFT_DC);  Serial.print(F("/"));  Serial.print(TFT_RST);
+  Serial.print(F("/"));  Serial.println(TFT_BL);
+  Serial.println(F("TFT cmds: V test / I invert / C RGB-BGR / N backlight / O<col>,<row> offset"));
+#endif
   Serial.println(F("====================================================="));
 }
 
@@ -418,6 +511,31 @@ void setup() {
 #endif
   _delay(1000);                          // 等 USB 串口就绪，否则看不到开头日志
   SimpleFOCDebug::enable(&Serial);       // 打印 MOT:/SEN: 调试信息，非常关键
+
+#if USE_TFT
+  // 屏幕初始化放在最前面：就算后面 initFOC() 失败或 AS5600 没接，
+  // 开机画面也已经亮起，能立刻判断是屏的问题还是电机的问题。
+  dashboard.begin(TFT_SPI_HZ, TFT_W, TFT_H, TFT_COL_OFS, TFT_ROW_OFS,
+                  TFT_INVERT != 0, TFT_BGR != 0);
+  dashboard.showSplash();
+  command.add('V', doTftTest,   "V toggle TFT test pattern");
+  command.add('I', doTftInvert, "I toggle display inversion");
+  command.add('C', doTftBGR,    "C toggle RGB/BGR color order");
+  command.add('N', doTftBL,     "N toggle backlight");
+  command.add('O', doTftOffset, "O<col>,<row> set CASET/RASET offset");
+  xTaskCreatePinnedToCore(tftTask, "TFT_UI", 6144, NULL, 1, NULL, 0);
+  Serial.println(F("TFT: ST7789P3 ready, UI task pinned to core 0"));
+  _delay(800);                          // 让开机画面看得见
+#endif
+
+#if STAGE == 0
+  // 只测屏幕：完全不初始化 Wire / driver / motor，电机不会上电、不会校准。
+  Serial.println(F("=== STAGE 0: TFT self-test. Motor/driver/sensor NOT initialized. ==="));
+  Serial.println(F("V test pattern / I invert / C RGB-BGR / N backlight / O<col>,<row> offset"));
+  dispState.mode = 3;
+  dashboard.request(TFT_REQ_TEST);
+  return;
+#endif
 
   Wire.begin(PIN_SDA, PIN_SCL);          // 必须在 sensor.init() 之前
   Wire.setClock(400000);                 // 读数跳就降到 100000
@@ -554,12 +672,25 @@ float computeBrakeUq() {
 
 void loop() {
   updateStatusLed();                     // 非阻塞，不占用 loopFOC 的时间预算
+#if STAGE == 0
+  command.run();                         // 屏幕自检：只处理 V/I/C/N/O，电机不参与
+  _delay(20);
+  return;
+#endif
 #if STAGE == 1
   sensor.update();
   Serial.print(sensor.getAngle(), 4);
   Serial.print(F("\t"));
   Serial.println(sensor.getVelocity(), 4);
+#if USE_TFT
+  dispState.angle    = sensor.getAngle();
+  dispState.velocity = sensor.getVelocity();
+  dispState.mode     = 2;
+  dispState.sensorOk = true;
+  dispState.enabled  = true;
+#endif
   _delay(100);
+  command.run();
 #else
   // SimpleFOC 2.4.0 的关键点：setPhaseVoltage()（真正写 PWM）在 loopFOC() 里执行，
   // move() 只计算 current_sp。开环模式也必须调用 loopFOC()，否则三相电压恒为 0、
@@ -591,6 +722,21 @@ void loop() {
     brakeUq  = 0.0f;
   }
   // motor.monitor();                   // 需要看曲线再打开，会明显拖慢循环
+#if USE_TFT
+  /* 只写几个标量（core 0 读），不做任何 SPI 操作，不影响 loopFOC() 频率 */
+  dispState.angle    = motor.shaft_angle - homeAngle;
+  dispState.velocity = motor.shaft_velocity;
+  dispState.target   = hapticMode ? (target - homeAngle) : target;
+  dispState.uq       = springUq;
+  dispState.kp       = springKp;
+  dispState.kd       = springKd;
+  dispState.db       = springDb;
+  dispState.vlimit   = motor.voltage_limit;
+  dispState.mode     = hapticMode ? 1 : 0;
+  dispState.silent   = velSilent;
+  dispState.enabled  = motor.enabled;
+  dispState.sensorOk = diagSensorReady;
+#endif
   command.run();
 #endif
 }

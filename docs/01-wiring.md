@@ -30,6 +30,23 @@
 
 **S3 引脚禁区**：`GPIO0/3/45/46`（strapping）、`19/20`（原生 USB D-/D+）、`26~32`（Flash/PSRAM）、`33~37`（部分 WROOM-1 批次 octal PSRAM）、`43/44`（默认 UART0）、`48`（板载 WS2812 RGB）。项目选的 4~9 全部是安全普通 GPIO；S3 有 MCPWM，任意可用 GPIO 都能当 PWM，没有引脚组限制。C3 用的是 LEDC，两者 PWM 后端不同但 `BLDCDriver3PWM` 用法一样。
 
+### 可选：1.83" TFT（ST7789P3 / 240×284 / 4 线 SPI）
+
+8 针模块 `GND VCC SCL SDA RES DC CS BLK`，屏幕只写不读，**没有 MISO**：
+
+| 屏脚 | ESP32-S3 | 说明 |
+| --- | --- | --- |
+| GND | GND | 与驱动板、AS5600 全部共地 |
+| VCC | 3V3 | 3.3V 逻辑；部分模块可 5V，先按 3V3 试 |
+| SCL | GPIO12 | 默认 SCK |
+| SDA | GPIO11 | 默认 MOSI |
+| RES | GPIO15 | 复位，低有效 |
+| DC | GPIO14 | 命令 / 数据 |
+| CS | GPIO10 | 默认 SS |
+| BLK | GPIO16 | PWM 背光，或直接接 3V3 常亮 |
+
+`10/11/12/13` 是 esp32 core 给 S3 的默认 `SS/MOSI/SCK/MISO`，加上 `14/15/16` 全部空闲，**不与电机 4~7、AS5600 8/9 冲突**，接屏不用改原来的任何一根线。第一次接屏请用 `STAGE 0` 只测屏（完全不初始化电机），详见 [06-tft-display.md](06-tft-display.md)。
+
 ## ESP32-C3 SuperMini（历史版本）
 
 | ESP32-C3 | 接往 |
@@ -75,3 +92,4 @@ C3 的 `18/19` 是原生 USB D-/D+、`20/21` 是 UART0、`2/8/9` 是 strapping �
 | 三相无输出、`Ua/Ub/Uc` 全是 6V 左右（50% 占空） | EN 没拉高、VIN 没上电、共地缺失、`V_LIMIT` 太小 |
 | FAULT 灯亮 / 电机发热 | 过流、欠压或过温；立刻断电查相线短路与 `voltage_limit / 相阻` |
 | 手转一圈角度不是 0~6.28 线性 | 磁铁装反 / 气隙过大 / 磁铁不是径向充磁 / 编码器板没与轴同心 |
+| 屏背光亮但全黑、彩条红蓝互换、白框缺边 | 屏线 `SCL/SDA/CS/DC` 接错、`TFT_SPI_HZ` 太高、显存偏移不对；用 `STAGE 0` + `V/I/C/O` 校准，见 [06-tft-display.md](06-tft-display.md) |
