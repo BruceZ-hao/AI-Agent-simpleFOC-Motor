@@ -7,13 +7,14 @@ SimpleFOC 触觉旋钮整机外壳 —— Blender 5.3 参数化生成器
 或双击 regen.bat
 
 产出:
-  stl/01_lower_case.stl   底盒（电子层：板卡槽、螺柱、散热格栅、USB/出线孔）
+  stl/01_lower_case.stl   底盒（完整平底内腔，无板卡槽；四角螺柱、散热格栅、USB/出线/电源开关孔）
+                          三块板（ESP32 / 驱动板 / 5x3.5cm 电源模块）排针朝下直接堆放
   stl/02_top_cover.stl    顶盖 / 电机座（沉台、四柱长槽、中心让位、按钮孔、散热孔）
   stl/03_knob.stl         可选旋钮（滚花 + 轴孔 + 紧定螺钉孔）
   render/01_assembled.png 成品渲染
   render/02_exploded.png  爆炸装配图
-  render/03_interior.png  内部俯视（板卡布局）
-  Enclosure.blend         Blender 源文件（含参考体：电机/编码器/两块板卡）
+  render/03_interior.png  内部俯视（三块板卡堆放布局）
+  Enclosure.blend         Blender 源文件（含参考体：电机/编码器/ESP32/驱动板/电源模块）
   build_report.txt        参数表、假设清单、BOM、装配步骤、网格自检
 
 单位 mm。所有尺寸集中在 P 字典，量完实物改数字重跑即可。
@@ -47,15 +48,23 @@ P = dict(
     post_od=6.2, post_hole_d=2.6, post_hole_depth=12.0,
     lid_screw_d=3.4, lid_cs_d=6.4, lid_cs_h=1.8,
 
-    # ---- 板卡固定（两块板都没有安装孔，只能边沿限位）----
-    pad_h=3.0, pad_size=8.0,
-    fence_w=2.0, fence_h=4.8, fence_len=12.0, fence_gap=0.35,
+    # ---- 板卡：三块板都无固定孔、排针朝下，平底直接堆放，不做任何定位槽 ----
+    # pin_h 只是「排针高度」，仅用于渲染参考体的摆放高度，STL 里不产生任何凸起
+    pin_h=2.5,
     esp32_center=(-18.0, -12.0), esp32_w=63.0, esp32_d=25.5, esp32_t=1.6,
-    driver_center=(22.0, 12.0), driver_w=26.0, driver_d=21.0, driver_t=1.6,
+    driver_center=(-28.0, 15.0), driver_w=26.0, driver_d=21.0, driver_t=1.6,
+    # 5 x 3.5 cm 电源模块 = 50 x 35 mm；竖放后实际占位 X=35 / Y=50
+    psu_center=(32.0, 0.0), psu_w=50.0, psu_d=35.0, psu_t=1.6,
+    psu_rotate=True,
 
     # ---- 开口 / 散热 ----
     usb_w=12.0, usb_h=5.0, usb_z=8.6,
     wire_d=8.0, wire_y=12.0, wire_z=14.0,
+    # 侧边电源开关口（+X 侧壁，靠近电源模块；与 Ø8 出线孔错开 Y）
+    # "round" = 拨动开关圆形开孔 / "rect" = 船型开关矩形开孔 / "none" = 不开孔
+    sw_shape="round", sw_d=6.5,
+    sw_rect_w=19.0, sw_rect_h=13.0,   # 船型开孔：沿侧壁 Y 宽 x 竖直 Z 高
+    sw_y=-18.0, sw_z=16.0,
     vent_w=14.0, vent_h=2.6,
     vent_xs=(-36.0, -18.0, 0.0, 18.0, 36.0),
     vent_zs=(13.0, 19.0, 25.0),
@@ -364,10 +373,19 @@ def build_lower(coll, mat):
     cuts.append(box("cut_usb", wall + 4, P["usb_w"], P["usb_h"],
                     -(W / 2 - wall / 2), P["esp32_center"][1], P["usb_z"], coll))
 
-    # 12V / 电机线出线孔（+X 端，对准驱动板）
+    # 12V / 电机线出线孔（+X 端，对准电源模块）
     cuts.append(cylinder("cut_wire", P["wire_d"] / 2, wall + 4,
                          W / 2 - wall / 2, P["wire_y"], P["wire_z"],
                          rot=(0, math.pi / 2, 0), coll=coll))
+
+    # 侧边电源开关口（+X 端，与出线孔错开 Y）
+    if P["sw_shape"] == "round":
+        cuts.append(cylinder("cut_switch", P["sw_d"] / 2, wall + 4,
+                             W / 2 - wall / 2, P["sw_y"], P["sw_z"],
+                             rot=(0, math.pi / 2, 0), coll=coll))
+    elif P["sw_shape"] == "rect":
+        cuts.append(box("cut_switch", wall + 4, P["sw_rect_w"], P["sw_rect_h"],
+                        W / 2 - wall / 2, P["sw_y"], P["sw_z"], coll))
 
     # 底面脚垫凹坑
     for sx in (-1, 1):
@@ -377,30 +395,10 @@ def build_lower(coll, mat):
                                  P["foot_depth"] / 2 - 1, coll=coll))
     boolean(shell, cuts, 'DIFFERENCE')
 
-    # --- 加法特征：板卡垫台 + L 形挡边 + 四角螺柱 ---
+    # --- 加法特征：只有四角螺柱 ---
+    # 内腔保持完整平底：三块板排针朝下直接堆放，不做垫台 / 挡边 / 定位槽，
+    # 板子位置完全自由，也不占用内腔净高。
     adds = []
-    for (bx, by), bw, bd in (
-            (P["esp32_center"], P["esp32_w"], P["esp32_d"]),
-            (P["driver_center"], P["driver_w"], P["driver_d"])):
-        for sx in (-1, 1):
-            for sy in (-1, 1):
-                cx, cy = bx + sx * bw / 2, by + sy * bd / 2
-                pad = P["pad_size"]
-                # 垫台：位于板角内侧，顶面给板底排针让位
-                adds.append(box("pad", pad, pad, P["pad_h"] + 0.2,
-                                cx - sx * pad / 2, cy - sy * pad / 2,
-                                ft + P["pad_h"] / 2 - 0.1, coll))
-                # 沿 X 的挡边（在板的 ±Y 外侧）
-                adds.append(box("fence_x", P["fence_len"], P["fence_w"], P["fence_h"] + 0.2,
-                                cx - sx * P["fence_len"] / 2,
-                                cy + sy * (P["fence_gap"] + P["fence_w"] / 2),
-                                ft + P["fence_h"] / 2 - 0.1, coll))
-                # 沿 Y 的挡边（在板的 ±X 外侧）
-                adds.append(box("fence_y", P["fence_w"], P["fence_len"], P["fence_h"] + 0.2,
-                                cx + sx * (P["fence_gap"] + P["fence_w"] / 2),
-                                cy - sy * P["fence_len"] / 2,
-                                ft + P["fence_h"] / 2 - 0.1, coll))
-
     for sx in (-1, 1):
         for sy in (-1, 1):
             adds.append(cylinder("post", P["post_od"] / 2, H - ft + 0.2,
@@ -574,9 +572,13 @@ def build_references(coll, mats):
                                 coll=coll))
     add(join(pillars, "REF_pillars"), "pillars", "black")
 
+    # 三块板排针朝下、直接落在平底上；lift 只影响参考体，不改变底盒 STL
+    lift = P["floor_t"] + P["pin_h"]
+    pins = []
+
     # ESP32-S3 DevKitC-1
     bx, by = P["esp32_center"]
-    bz = P["floor_t"] + P["pad_h"] + P["esp32_t"] / 2
+    bz = lift + P["esp32_t"] / 2
     add(box("REF_esp32_pcb", P["esp32_w"], P["esp32_d"], P["esp32_t"],
             bx, by, bz, coll), "esp32", "pcb_blue")
     add(box("REF_esp32_chip", 18, 18, 1.0, bx - 4, by, bz + 1.3, coll),
@@ -584,13 +586,57 @@ def build_references(coll, mats):
     add(box("REF_usb_c", 7.5, 9.0, 3.2,
             bx - P["esp32_w"] / 2 - 0.5, by, bz + 1.0, coll),
         "usb", "steel")
+    for s in (-1, 1):
+        pins.append(box("REF_pin_esp", P["esp32_w"] - 6, 2.54, P["pin_h"],
+                        bx, by + s * (P["esp32_d"] / 2 - 3.0),
+                        P["floor_t"] + P["pin_h"] / 2, coll))
+
     # DengFOC-Mini
     dx, dy = P["driver_center"]
-    dz = P["floor_t"] + P["pad_h"] + P["driver_t"] / 2
+    dz = lift + P["driver_t"] / 2
     add(box("REF_driver_pcb", P["driver_w"], P["driver_d"], P["driver_t"],
             dx, dy, dz, coll), "driver", "pcb")
     add(box("REF_driver_chip", 9, 9, 0.9, dx, dy, dz + 1.2, coll),
         "driver_chip", "chip")
+    for s in (-1, 1):
+        pins.append(box("REF_pin_drv", P["driver_w"] - 4, 2.54, P["pin_h"],
+                        dx, dy + s * (P["driver_d"] / 2 - 2.5),
+                        P["floor_t"] + P["pin_h"] / 2, coll))
+
+    # 5 x 3.5 cm 电源模块（标称 50 x 35；竖放后 X 向 35 / Y 向 50）
+    px, py = P["psu_center"]
+    pw, pd = ((P["psu_d"], P["psu_w"]) if P["psu_rotate"]
+              else (P["psu_w"], P["psu_d"]))
+    pz = lift + P["psu_t"] / 2
+    add(box("REF_psu_pcb", pw, pd, P["psu_t"], px, py, pz, coll), "psu", "psu")
+    add(box("REF_psu_terminal", 11, 9, 6.0,
+            px + pw / 2 - 6.5, py - pd / 2 + 7.0, pz + 3.4, coll),
+        "psu_term", "steel")
+    add(box("REF_psu_caps", 8, 8, 5.0,
+            px - pw / 2 + 6.5, py + pd / 2 - 8.0, pz + 3.0, coll),
+        "psu_caps", "chip")
+    for s in (-1, 1):
+        pins.append(box("REF_pin_psu", 2.54, pd - 6, P["pin_h"],
+                        px + s * (pw / 2 - 3.0), py,
+                        P["floor_t"] + P["pin_h"] / 2, coll))
+
+    add(join(pins, "REF_pin_strips"), "pins", "chip")
+
+    # 侧边电源开关（参考体，卡在 +X 侧壁开孔上）
+    if P["sw_shape"] != "none":
+        sx0 = P["case_w"] / 2 + 1.0
+        if P["sw_shape"] == "round":
+            add(cylinder("REF_switch_body", P["sw_d"] / 2 + 1.4, 6.0,
+                         sx0, P["sw_y"], P["sw_z"],
+                         rot=(0, math.pi / 2, 0), verts=24, coll=coll),
+                "switch", "chip")
+            add(box("REF_switch_lever", 6.0, 2.6, 2.6,
+                    sx0 + 4.0, P["sw_y"], P["sw_z"] + 1.0, coll),
+                "switch_lever", "steel")
+        else:
+            add(box("REF_switch_body", 4.0, P["sw_rect_w"] - 1.0,
+                    P["sw_rect_h"] - 1.0,
+                    sx0, P["sw_y"], P["sw_z"], coll), "switch", "chip")
     return objs
 
 
@@ -689,6 +735,7 @@ def main():
         black=material("尼龙柱", (0.10, 0.10, 0.12), 0.7),
         pcb=material("PCB - 黑", (0.06, 0.13, 0.10), 0.65),
         pcb_blue=material("PCB - 深蓝", (0.07, 0.11, 0.22), 0.6),
+        psu=material("电源模块 - 绿", (0.10, 0.32, 0.17), 0.6),
         chip=material("芯片", (0.12, 0.12, 0.14), 0.45),
         ground=material("地面", (0.70, 0.73, 0.77), 0.9),
         inspect=material("检视 - 浅灰", (0.52, 0.57, 0.63), 0.8),
@@ -732,7 +779,7 @@ def main():
               refs["encoder"], refs["pillars"], ground]
     for o in hidden:
         o.hide_render = True
-    # 检视视图临时用浅色底盒，让挡边 / 螺柱 / 内腔轮廓和深色 PCB 分开
+    # 检视视图临时用浅色底盒，让平底 / 螺柱 / 内腔轮廓和深色 PCB 分开
     case_mat = lower.data.materials[0]
     lower.data.materials[0] = mats["inspect"]
     r_interior = render(os.path.join(RENDER_DIR, "03_interior.png"), cam,
@@ -749,6 +796,9 @@ def main():
         encoder=(0, 0, 56), pillars=(0, 0, 56),
         esp32=(0, 0, 16), esp32_chip=(0, 0, 16), usb=(0, 0, 16),
         driver=(0, 0, 16), driver_chip=(0, 0, 16),
+        psu=(0, 0, 16), psu_term=(0, 0, 16), psu_caps=(0, 0, 16),
+        pins=(0, 0, 16),
+        switch=(0, 0, 0), switch_lever=(0, 0, 0),   # 开关留在底盒侧壁上
     )
     moved = [(lower, Vector((0, 0, 0))), (lid, Vector(offsets["lid"])),
              (knob, Vector(offsets["knob"]))]
@@ -764,9 +814,10 @@ def main():
         label("03  KNOB (optional)", (0, -30, 192), cam, mats["text"]),
         label("02  TOP COVER / MOTOR MOUNT", (0, -40, 86), cam, mats["text"]),
         label("MOTOR + ENCODER + 4 PILLARS", (0, -40, 148), cam, mats["text"]),
-        label("ESP32-S3 DevKitC-1", (-20, -60, 26), cam, mats["text"], 4.0),
-        label("DengFOC-Mini", (24, -60, 26), cam, mats["text"], 4.0),
-        label("01  LOWER CASE", (0, -64, 4), cam, mats["text"]),
+        # 板卡标签放在盒体投影之外的前下方空白，避免被深色盒壁吃掉
+        label("ESP32-S3 + DengFOC-Mini", (-26, -70, 10), cam, mats["text"], 3.2),
+        label("PSU 50x35 + SIDE SWITCH", (36, -70, 10), cam, mats["text"], 3.2),
+        label("01  LOWER CASE", (0, -88, -2), cam, mats["text"]),
     ]
     r_exploded = render(os.path.join(RENDER_DIR, "02_exploded.png"), cam,
                         (240, -280, 220), (0, 0, 90))
@@ -791,6 +842,8 @@ def main():
 def write_report(stl_report, blend_path, renders):
     W, D, H = P["case_w"], P["case_d"], P["case_h"]
     top = H + P["lid_t"]
+    psu_x, psu_y = ((P["psu_d"], P["psu_w"]) if P["psu_rotate"]
+                    else (P["psu_w"], P["psu_d"]))
     lines = []
     A = lines.append
     A("=" * 66)
@@ -807,15 +860,25 @@ def write_report(stl_report, blend_path, renders):
     A("  电子层内净高 %.1f mm；电机装在顶盖上方，散热好、装配简单。" % (H - P["floor_t"]))
     A("")
     A("【四个关键结构】")
-    A("  1) 板卡无固定孔 -> 四角 8x8 垫台 + L 形挡边限位，垫台抬高 %.1f mm 给板底排针让位。" % P["pad_h"])
-    A("     ESP32-S3-DevKitC-1  %.1f x %.1f  中心 (%.1f, %.1f)" % (P["esp32_w"], P["esp32_d"], *P["esp32_center"]))
-    A("     DengFOC-Mini          %.1f x %.1f  中心 (%.1f, %.1f)" % (P["driver_w"], P["driver_d"], *P["driver_center"]))
+    A("  1) 底盒内腔是完整平底：不做垫台 / 挡边 / 板卡槽，三块板排针朝下直接堆放，位置自由。")
+    A("     板底排针约 %.1f mm 自然把板撑起；需要更高就自行贴泡棉或尼龙脚垫。" % P["pin_h"])
+    A("     ESP32-S3-DevKitC-1   %.1f x %.1f  中心 (%.1f, %.1f)" % (P["esp32_w"], P["esp32_d"], *P["esp32_center"]))
+    A("     DengFOC-Mini           %.1f x %.1f  中心 (%.1f, %.1f)" % (P["driver_w"], P["driver_d"], *P["driver_center"]))
+    A("     电源模块 5x3.5 cm      %.1f x %.1f  中心 (%.1f, %.1f)，竖放占 X %.1f / Y %.1f"
+      % (P["psu_w"], P["psu_d"], *P["psu_center"], psu_x, psu_y))
+    A("     三者互不重叠，且与四角螺柱留空；此为建议布局，实际可随意挪动。")
     A("  2) 顶盖中央 Ø%.1f 沉台 + 中心 Ø%.1f 让位孔 + 4 条 45° 径向长槽（宽 %.1f，半径 %.1f~%.1f）。"
       % (P["motor_recess_d"], P["axis_hole_d"], P["pillar_slot_w"],
          P["pillar_slot_r0"], P["pillar_slot_r1"]))
     A("     长槽对应照片里电机底部那 4 根向下的尼龙支撑柱，兼容对角孔距 24~38 mm。")
-    A("  3) -X 侧壁 USB-C 开口 %.1f x %.1f（中心 z=%.1f），+X 侧壁 Ø%.1f 出线孔，"
-      % (P["usb_w"], P["usb_h"], P["usb_z"], P["wire_d"]))
+    A("  3) -X 侧壁 USB-C 开口 %.1f x %.1f（中心 z=%.1f），+X 侧壁 Ø%.1f 出线孔（y=%.1f）。"
+      % (P["usb_w"], P["usb_h"], P["usb_z"], P["wire_d"], P["wire_y"]))
+    if P["sw_shape"] == "round":
+        A("     +X 侧壁电源开关口 Ø%.1f（y=%.1f, z=%.1f），适配小型拨动开关；串在 12V 正极上。"
+          % (P["sw_d"], P["sw_y"], P["sw_z"]))
+    elif P["sw_shape"] == "rect":
+        A("     +X 侧壁电源开关口 %.1f x %.1f（y=%.1f, z=%.1f），适配船型开关；串在 12V 正极上。"
+          % (P["sw_rect_w"], P["sw_rect_h"], P["sw_y"], P["sw_z"]))
     A("     两侧壁各 15 条散热格栅，顶盖 12 个散热孔 + 2 个 BOOT/RESET 针孔。")
     A("  4) 四角 M3 螺柱 + 沉头螺钉固定顶盖；底面 4 个 Ø%.1f 橡胶脚垫凹坑。" % P["foot_d"])
     A("")
@@ -836,9 +899,16 @@ def write_report(stl_report, blend_path, renders):
     A("  - 轴径 Ø%.1f（旋钮孔径），M3 紧定螺钉横孔 Ø%.1f"
       % (P["shaft_d"], P["set_screw_d"]))
     A("  - ESP32-S3 板 USB-C 端中心高度 z=%.1f；BOOT/RESET 针孔位置按常见 DevKitC-1 估计。" % P["usb_z"])
-    A("  - 两块板卡尺寸沿用上次查证的标准值：63 x 25.5 / 26 x 21 mm。")
+    A("  - 板卡尺寸：ESP32-S3 63 x 25.5 / DengFOC-Mini 26 x 21 / 电源模块 50 x 35 mm。")
+    A("    用户说的「5*3.5」按 5 cm x 3.5 cm 理解；单位不同就改 P 里的 psu_w / psu_d。")
+    A("  - 电源模块默认竖放（X 向 35 / Y 向 50）排在 +X 侧，靠近出线孔与开关。")
+    A("  - 开关口默认 Ø%.1f 圆形拨动开关；用船型开关请把 sw_shape 改成 'rect' 并核对开孔尺寸。" % P["sw_d"])
     A("")
     A("【五金 BOM】")
+    A("  电源模块 5x3.5cm x1（12V 输入 -> 给 ESP32 与驱动板供电，线束从 +X Ø8 孔进出）")
+    A("  小型拨动开关 x1（开孔 Ø%.1f）或船型开关 x1（开孔 %.1f x %.1f），串在 12V 正极上"
+      % (P["sw_d"], P["sw_rect_w"], P["sw_rect_h"]))
+    A("  泡棉双面胶 / 尼龙脚垫 2~3mm 若干（可选，垫在板下防滑动、让排针不顶到底）")
     A("  M3 x 12 沉头螺钉 x4（顶盖 -> 底盒螺柱，自攻进 Ø2.6 孔）")
     A("  M3 螺母 + 垫片(Ø10) x4（把电机 4 根支撑柱锁在顶盖长槽上；若柱内是 M3 螺纹则改用 M3x10 螺钉）")
     A("  橡胶脚垫 Ø8 x4、少量热熔胶（固定线束）、扎带 x2")
@@ -850,8 +920,10 @@ def write_report(stl_report, blend_path, renders):
     A("  螺柱自攻孔 Ø2.6 若太紧可用 M3 丝锥或 3.0 钻头轻扩。")
     A("")
     A("【装配顺序】")
-    A("  1. 底盒朝上，把 ESP32-S3 与 DengFOC-Mini 按挡边位置压到垫台上。")
-    A("  2. 12V 电源线从 +X 出线孔穿入并接到驱动板；三相线 + 编码器线从顶盖 Ø9 过孔穿入。")
+    A("  1. 底盒朝上，把电源模块、DengFOC-Mini、ESP32-S3 排针朝下直接放进去（无卡槽，位置自由），")
+    A("     让 ESP32 的 USB-C 对准 -X 侧壁开口；需要防滑就垫 2~3mm 泡棉。")
+    A("  2. 开关装进 +X 侧壁开孔；12V 电源线从 Ø8 出线孔穿入，经开关到电源模块，")
+    A("     模块输出再分给驱动板 VIN 与 ESP32；三相线 + 编码器线从顶盖 Ø9 过孔穿入。")
     A("  3. 电机 4 根支撑柱对准顶盖长槽插入，从盒内侧用螺母/垫片或螺钉锁紧。")
     A("  4. 盖上顶盖（唇边插入内腔），四角拧入 M3x12 沉头螺钉。")
     A("  5. 白色转盘即现成旋钮；若要更大握持感，套上 03_knob.stl 并用 M3 紧定螺钉固定。")
