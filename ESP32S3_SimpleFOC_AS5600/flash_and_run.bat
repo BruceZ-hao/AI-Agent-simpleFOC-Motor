@@ -28,7 +28,10 @@ echo     The app starts right after flashing and runs initFOC() alignment
 echo     at once; it needs a powered, unloaded motor to calibrate correctly.
 echo   - Close the Arduino IDE Serial Monitor AND click Disconnect in the
 echo     HapticConsole web page to free the serial port.
-echo   - If calibration was done with 12V off, just press RESET afterwards.
+echo   - If 12V is off, initFOC will fail but the app stays alive: motor
+echo     outputs are disabled, screen shows FOC FAIL, and V/I/C/N/O screen
+echo     calibration commands still work. Wire 12V + phases, free the shaft,
+echo     then press RESET to retry calibration (no reflash needed).
 echo.
 set "PORT=COM6"
 set /p "PORT=Serial port (Enter = COM6): "

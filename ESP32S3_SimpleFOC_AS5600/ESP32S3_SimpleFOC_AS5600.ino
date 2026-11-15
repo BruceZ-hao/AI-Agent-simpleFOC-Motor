@@ -231,6 +231,7 @@ bool  velSilent = true;     // S1/S0：速度环零速静音刹车开关
 float brakeKd  = VEL_BRAKE_KD;  // 停车阻尼，G 命令实时调
 float brakeDb  = VEL_BRAKE_DB;  // 速度死区，J 命令实时调
 float brakeUq  = 0.0f;      // 最近一次电刹车输出 [V]
+bool  focReady = true;      // initFOC() 是否成功；失败时禁用电机但保留串口/屏幕调试
 
 #if USE_TFT
 /* loop() 写、显示任务读的快照；全部为 32 位以内标量，双核读写无需加锁 */
@@ -602,8 +603,13 @@ void setup() {
 #if STAGE == 3
   // 校准时电机会轻微正反各转一下，务必让它空转、别捏着轴
   if (motor.initFOC() != 1) {
+    // 不在这里 while(1)：否则 command.run() 永远不执行，屏幕校准命令 V/I/C/N/O
+    // 和串口诊断全部失效。常见原因是 12V 没接 / 三相线松 / 轴被卡住。
+    focReady = false;
+    motor.disable();                   // 未校准时禁止输出，避免按错误电角度乱加电压
     Serial.println(F("initFOC failed! Check pole pairs / sensor direction."));
-    while (1) { _delay(1000); }
+    Serial.println(F("Motor outputs DISABLED. Check 12V / 3 phases / EN / free shaft."));
+    Serial.println(F("Press RESET to retry. Serial + TFT cmds (V/I/C/N/O) stay live."));
   }
 #endif
 
@@ -692,6 +698,16 @@ void loop() {
   _delay(100);
   command.run();
 #else
+  command.run();                       // 命令始终可用，即使 FOC 校准失败
+  if (!focReady) {
+#if USE_TFT
+    dispState.uq      = 0.0f;
+    dispState.enabled = false;
+    dispState.mode    = 4;             // 屏幕显示 FOC FAIL，但 V/I/C/N/O 仍可校准
+#endif
+    _delay(20);
+    return;                            // 跳过 loopFOC()/move()，驱动已 disable
+  }
   // SimpleFOC 2.4.0 的关键点：setPhaseVoltage()（真正写 PWM）在 loopFOC() 里执行，
   // move() 只计算 current_sp。开环模式也必须调用 loopFOC()，否则三相电压恒为 0、
   // 电机完全不动（曾据此误判为硬件故障）。顺序必须 loopFOC() 在前、move() 在后。
@@ -737,6 +753,6 @@ void loop() {
   dispState.enabled  = motor.enabled;
   dispState.sensorOk = diagSensorReady;
 #endif
-  command.run();
+  // command.run() 已在 loop 开头执行（校准失败时也能响应）
 #endif
 }

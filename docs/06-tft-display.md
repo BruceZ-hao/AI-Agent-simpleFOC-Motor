@@ -68,7 +68,10 @@ core 0 : tftTask (priority 1, 20 FPS)
 
 编译上传后 **Wire / driver / motor 全部不初始化**，电机不上电、不做 `initFOC()` 对齐，屏幕显示开机画面后自动进入测试图（一个橙色小方块来回移动证明程序在跑）。这一步能独立验证 8 根线、供电、初始化序列和显存偏移。
 
-> 用 `flash_and_run.bat` 烧的是仓库里预编译的 STAGE 3 镜像；要测 STAGE 0 请用 Arduino IDE 自己编译上传，或按下面命令用 `arduino-cli` 导出镜像。
+> **最快路径**：直接双击 `flash_stage0.bat`，它烧录仓库里预编译的 `ESP32S3_SimpleFOC_AS5600.STAGE0.bin`（4MB 合并镜像），**不用装 Arduino IDE、不用编译、不用接 12V**。
+> `flash_and_run.bat` 烧的是 STAGE 3 主固件，两个镜像互不影响，随时可以来回切换。
+
+若要自己从源码编译（例如改了 `TFT_*` 参数）：
 
 ```bat
 arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,UploadSpeed=115200" ^
@@ -76,6 +79,11 @@ arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,UploadSpeed=115200
 ```
 
 ## 4. 屏幕校准（不用重新编译）
+
+下面这些命令在**两种情况下都能用**：
+
+- **STAGE 0 镜像**：完全不碰电机，第一次接线时推荐。
+- **STAGE 3 主固件但没接 12V**：上电 `initFOC()` 会失败，固件**不再卡死**——串口打印 `Motor outputs DISABLED`，屏幕模式标签显示 `FOC FAIL`，电机输出已禁用，但 `V/I/C/N/O` 和串口诊断照常响应，可以先专心把屏幕调好。接好 12V / 三相线并让轴空转后**按一下板子 RESET** 就会重新校准并进入弹簧回中，不用重烧。
 
 STAGE 0 下用串口 115200 发这些命令，效果立刻生效：
 

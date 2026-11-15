@@ -20,7 +20,7 @@ struct DisplayState {
   volatile float uq;           // 当前输出电压 [V]
   volatile float kp, kd, db;   // 弹簧刚度 / 阻尼 / 死区
   volatile float vlimit;       // 电压限幅 [V]，力矩条满量程
-  volatile uint8_t mode;       // 0=速度环 1=弹簧回中 2=传感器自检
+  volatile uint8_t mode;       // 0=速度环 1=弹簧回中 2=传感器自检 3=屏幕自检 4=FOC校准失败
   volatile bool sensorOk, silent, enabled;
   volatile uint16_t fps;       // 由显示任务回写
 };
@@ -181,6 +181,7 @@ class TFTDashboard {
   void drawDynamic() {
     const char* tag = (_s->mode == 1) ? "HAPTIC"
                     : (_s->mode == 2) ? "SENSOR"
+                    : (_s->mode == 4) ? "FOC FAIL"
                     : (_s->mode == 0) ? "VELOC" : "TEST";
 
     /* 顶部模式标签 */
