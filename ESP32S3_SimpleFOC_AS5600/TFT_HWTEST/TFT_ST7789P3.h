@@ -346,6 +346,14 @@ class ST7789P3 {
     writeData((uint8_t)(y0 >> 8)); writeData((uint8_t)y0);
     writeData((uint8_t)(y1 >> 8)); writeData((uint8_t)y1);
     writeCmd(0x2C);                                // RAMWR
+    /* 关键修复：4 线 SPI 的 D/CX 是「逐字节」采样的，writeCmd() 把 DC
+     * 拉低后不会自己恢复。若这里不拉回高电平，后面 fillRect / putPixel /
+     * drawChar 发出的全部像素字节都会被面板当成命令解析：
+     *   - GRAM 一直保持上电时的随机内容  -> 花屏；
+     *   - 像素流里偶然出现 0x28(DISPOFF) / 0x10(SLPIN) -> 屏幕被关掉变黑。
+     * 这正是「只见花屏 2.5 秒后黑」的根因，与 SPI 速率、背光 PWM、
+     * 刷屏任务跑哪个核都无关。所有像素写入都经过 setWindow()，改这一处即可。 */
+    digitalWrite(_dc, HIGH);
   }
 
   void putPixel(int16_t x, int16_t y, uint16_t c) {

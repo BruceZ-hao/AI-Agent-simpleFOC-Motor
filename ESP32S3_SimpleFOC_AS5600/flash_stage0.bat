@@ -22,7 +22,8 @@ echo  power up or align. 12V and the 3 phase wires are NOT required.
 echo  Use this to calibrate the screen before wiring the motor.
 echo.
 echo  After flashing: send V (test pattern), I (invert), C (RGB/BGR),
-echo  N (backlight), O^<col^>,^<row^> (GRAM offset) at 115200 baud.
+echo  N (backlight), O^<col^>,^<row^> (GRAM offset), Q^<MHz^> (SPI speed),
+echo  P (freeze to one static frame) at 115200 baud.
 echo  Then write the final values back to the .ino and reflash the
 echo  main firmware with flash_and_run.bat.
 echo.
@@ -45,7 +46,7 @@ if errorlevel 1 goto fail
 
 echo.
 echo  [OK] STAGE 0 flashed. Screen should show the test pattern.
-echo       Open Serial Monitor @115200 and send V / I / C / N / O to calibrate.
+echo       Open Serial Monitor @115200 and send V / I / C / N / O / Q / P to calibrate.
 echo       When done, reflash the main firmware with flash_and_run.bat.
 goto end
 

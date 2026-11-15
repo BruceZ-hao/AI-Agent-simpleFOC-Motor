@@ -65,7 +65,7 @@ class TFTDashboard {
                int8_t cs, int8_t dc, int8_t rst, int8_t bl)
       : _tft(sck, mosi, miso, cs, dc, rst, bl), _s(s), _w(240), _h(284),
         _req(0), _reqX(0), _reqY(0), _test(false), _needRebuild(true),
-        _needleValid(false), _oldX(0), _oldY(0),
+        _frozen(false), _needleValid(false), _oldX(0), _oldY(0),
         _testX(10), _testDir(1), _frames(0), _fpsT0(0), _keepAlive(0), _reqHz(0) {}
 
   bool begin(uint32_t hz, uint16_t w, uint16_t h,
@@ -82,9 +82,15 @@ class TFTDashboard {
     _tft.fillRect(20,  40, 200, 100, TFT_BLACK);
     _tft.fillRect(32,  52, 176,  76, TFT_ORANGE);
     _tft.fillRect(70, 170, 100,  40, TFT_BLUE);
-    _tft.text(28, 230, "TFT OK",       TFT_BLACK, TFT_WHITE, 2);
-    _tft.text(16, 256, "1MHz GPIO BL", TFT_BLACK, TFT_WHITE, 2);
+    _tft.text(28, 230, "TFT OK",         TFT_BLACK, TFT_WHITE, 2);
+    _tft.text(16, 256, "ST7789P3 DC FIX", TFT_BLACK, TFT_WHITE, 2);
   }
+
+  /* P 命令：冻结成「只画一帧静态图、之后不再写 GRAM」的模式。
+   * 用于 A/B 定位：冻结后画面稳定 = 持续刷新路径有问题；
+   * 冻结后仍花屏/黑屏 = 初始化或硬件问题。bool 是单字节，跨核无需加锁。 */
+  bool frozen() const     { return _frozen; }
+  void setFrozen(bool f)  { _frozen = f; }
 
   /* core 1 只置位，真正生效在 core 0 的帧首，保证 SPI 单核独占 */
   void request(uint8_t bit)            { _req |= bit; }
@@ -109,10 +115,12 @@ class TFTDashboard {
       if (_test) drawTest(); else drawStatic();
       _needRebuild = false;
       _needleValid = false;
+      Serial.println(F("TFT: static frame drawn (DC fix active)"));
     }
     // 每 20 帧（10FPS 下约 2 秒）重申 DISPON：万一一帧 SPI 毛刺把
     // RAMWR 打成 DISPOFF，屏幕最多黑 2 秒就会自己回来，不用按 RESET。
     if (++_keepAlive >= 20) { _keepAlive = 0; _tft.assertDisplayOn(); }
+    if (_frozen) return;               // 冻结：保留静态画面，不再写 GRAM
     if (_test) testAnimation(); else drawDynamic();
     countFps();
   }
@@ -122,7 +130,7 @@ class TFTDashboard {
   DisplayState* _s;
   uint16_t _w, _h;
   volatile uint8_t _req, _reqX, _reqY;
-  bool _test, _needRebuild, _needleValid;
+  bool _test, _needRebuild, _frozen, _needleValid;
   int16_t _oldX, _oldY, _testX, _testDir;
   uint32_t _frames, _fpsT0;
   uint16_t _keepAlive;

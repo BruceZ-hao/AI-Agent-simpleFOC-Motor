@@ -99,7 +99,10 @@
  * 钉在 core 0 的 FreeRTOS 任务里，loop() 只写一个 DisplayState 快照。
  * 驱动零依赖（TFT_ST7789P3.h），不用装 TFT_eSPI / Arduino_GFX。
  * 屏幕校准：STAGE 0 = 只测屏（完全不初始化电机）；运行时命令
- *   V 测试图 / I 反色 / C RGB-BGR / N 背光 / O<col>,<row> 显存偏移。
+ *   V 测试图 / I 反色 / C RGB-BGR / N 背光 / O<col>,<row> 显存偏移 /
+ *   Q<MHz> 换 SPI 速率 / P 冻结成单帧静态图（A/B 定位刷新问题）。
+ * 驱动修复记录：setWindow() 发完 RAMWR 必须把 DC 拉回高电平，否则全部
+ *   像素字节会被当作命令 -> 花屏，且像素里偶发 0x28/0x10 会关屏变黑。
  * 把 USE_TFT 改成 0 即可完全退回原来的纯串口固件。
  */
 
@@ -200,7 +203,7 @@ static_assert(V_LIMIT / PHASE_R < 5.5f,
 #define TFT_DC       14
 #define TFT_RST      15
 #define TFT_BL       16     // PWM 背光；不需要调光可直接把 BLK 接 3V3
-#define TFT_SPI_HZ   1000000UL  // 保守起步：1MHz 是硬件隔离测试实测能出图的速率
+#define TFT_SPI_HZ   4000000UL  // 4MHz：整屏约 0.27s。DC 修复后可稳跑；长线噪多发 Q2/Q1 降级
 #define TFT_BL_PWM   0          // 0=GPIO 常高（无 PWM 纹波，推荐）；1=LEDC 5kHz PWM 调光
 #define TFT_UI_CORE  0          // 刷屏任务所在核；排查 SPI 跨核问题时可改 1
 #define TFT_W        240
@@ -209,7 +212,7 @@ static_assert(V_LIMIT / PHASE_R < 5.5f,
 #define TFT_ROW_OFS  0
 #define TFT_INVERT   1      // IPS 模组多数需 INVON；黑白反了发 I 切换
 #define TFT_BGR      1      // 红蓝互换发 C 切换
-#define TFT_FPS_MS   100    // 10 FPS；1MHz 下全屏刷一次约 1 秒，先降低刷新负担
+#define TFT_FPS_MS   150    // ~6 FPS：4MHz 下每帧约 0.2s 的 GRAM 写入，别让屏幕一直处于半刷新状态
 /* ==================================================== */
 
 #if STAGE == 0 && !USE_TFT
@@ -280,6 +283,15 @@ void doTftOffset(char* cmd) {
   } else {
     Serial.println(F("Usage: O<col>,<row>   e.g. O0,20"));
   }
+}
+/* P：把 UI 冻结成「只画一帧静态图、之后不再写 GRAM」。
+ * 花屏/黑屏时先用它做 A/B：冻结后画面稳定 = 持续刷新路径有问题；
+ * 冻结后仍花屏 = 初始化或硬件问题。V/I/C/O 在冻结态仍会重画静态帧。 */
+void doTftFreeze(char*) {
+  const bool f = !dashboard.frozen();
+  dashboard.setFrozen(f);
+  Serial.println(f ? F("TFT: UI FROZEN - one static frame, no further GRAM writes")
+                   : F("TFT: UI RESUMED - dynamic dashboard"));
 }
 #endif
 
@@ -515,7 +527,7 @@ void printConfig() {
   Serial.print(F("/"));  Serial.print(TFT_CS);  Serial.print(F("/"));
   Serial.print(TFT_DC);  Serial.print(F("/"));  Serial.print(TFT_RST);
   Serial.print(F("/"));  Serial.println(TFT_BL);
-  Serial.println(F("TFT cmds: V test / I invert / C RGB-BGR / N backlight / O<col>,<row> / Q<MHz> speed"));
+  Serial.println(F("TFT cmds: V test / I invert / C RGB-BGR / N backlight / O<col>,<row> / Q<MHz> speed / P freeze"));
 #endif
   Serial.println(F("====================================================="));
 }
@@ -535,25 +547,30 @@ void setup() {
   dashboard.begin(TFT_SPI_HZ, TFT_W, TFT_H, TFT_COL_OFS, TFT_ROW_OFS,
                   TFT_INVERT != 0, TFT_BGR != 0);
   dashboard.showSplash();
-  Serial.println(F("TFT: splash drawn (WHITE bg + ORANGE block), hold 2.5s"));
+  Serial.println(F("TFT: splash drawn (WHITE bg + ORANGE block), DC fix active"));
   command.add('V', doTftTest,   "V toggle TFT test pattern");
   command.add('I', doTftInvert, "I toggle display inversion");
   command.add('C', doTftBGR,    "C toggle RGB/BGR color order");
   command.add('N', doTftBL,     "N toggle backlight");
   command.add('O', doTftOffset, "O<col>,<row> set CASET/RASET offset");
   command.add('Q', doTftSpeed,  "Q<MHz> set SPI speed (1..40)");
-  xTaskCreatePinnedToCore(tftTask, "TFT_UI", 6144, NULL, 1, NULL, TFT_UI_CORE);
+  command.add('P', doTftFreeze, "P freeze/resume UI (single-frame A/B test)");
   Serial.print(F("TFT: ST7789P3 ready, BL="));
   Serial.print(TFT_BL_PWM ? F("PWM") : F("GPIO"));
-  Serial.print(F(", UI task pinned to core "));
+  Serial.print(F(", UI core "));
   Serial.println(TFT_UI_CORE);
-  _delay(2500);                         // 让高对比开机画面看得清
+  /* 先让开机画面完整停留 2.5s，期间 core 0 完全不碰 SPI。
+   * 之前任务在这之前就启动，第一帧 drawStatic() 会立刻把开机画面刷成黑底，
+   * 用户根本分不清「开机画面有没有画对」。 */
+  _delay(2500);
+  xTaskCreatePinnedToCore(tftTask, "TFT_UI", 6144, NULL, 1, NULL, TFT_UI_CORE);
+  Serial.println(F("TFT: UI task started; send P to freeze at one static frame"));
 #endif
 
 #if STAGE == 0
   // 只测屏幕：完全不初始化 Wire / driver / motor，电机不会上电、不会校准。
   Serial.println(F("=== STAGE 0: TFT self-test. Motor/driver/sensor NOT initialized. ==="));
-  Serial.println(F("V test pattern / I invert / C RGB-BGR / N backlight / O<col>,<row> offset"));
+  Serial.println(F("V test / I invert / C RGB-BGR / N backlight / O<col>,<row> / Q<MHz> / P freeze"));
   dispState.mode = 3;
   dashboard.request(TFT_REQ_TEST);
   return;
@@ -624,13 +641,13 @@ void setup() {
 #if STAGE == 3
   // 校准时电机会轻微正反各转一下，务必让它空转、别捏着轴
   if (motor.initFOC() != 1) {
-    // 不在这里 while(1)：否则 command.run() 永远不执行，屏幕校准命令 V/I/C/N/O
+    // 不在这里 while(1)：否则 command.run() 永远不执行，屏幕校准命令 V/I/C/N/O/Q/P
     // 和串口诊断全部失效。常见原因是 12V 没接 / 三相线松 / 轴被卡住。
     focReady = false;
     motor.disable();                   // 未校准时禁止输出，避免按错误电角度乱加电压
     Serial.println(F("initFOC failed! Check pole pairs / sensor direction."));
     Serial.println(F("Motor outputs DISABLED. Check 12V / 3 phases / EN / free shaft."));
-    Serial.println(F("Press RESET to retry. Serial + TFT cmds (V/I/C/N/O) stay live."));
+    Serial.println(F("Press RESET to retry. Serial + TFT cmds (V/I/C/N/O/Q/P) stay live."));
   }
 #endif
 
@@ -700,7 +717,7 @@ float computeBrakeUq() {
 void loop() {
   updateStatusLed();                     // 非阻塞，不占用 loopFOC 的时间预算
 #if STAGE == 0
-  command.run();                         // 屏幕自检：只处理 V/I/C/N/O，电机不参与
+  command.run();                         // 屏幕自检：只处理 V/I/C/N/O/Q/P，电机不参与
   _delay(20);
   return;
 #endif
@@ -724,7 +741,7 @@ void loop() {
 #if USE_TFT
     dispState.uq      = 0.0f;
     dispState.enabled = false;
-    dispState.mode    = 4;             // 屏幕显示 FOC FAIL，但 V/I/C/N/O 仍可校准
+    dispState.mode    = 4;             // 屏幕显示 FOC FAIL，但 V/I/C/N/O/Q/P 仍可校准
 #endif
     _delay(20);
     return;                            // 跳过 loopFOC()/move()，驱动已 disable

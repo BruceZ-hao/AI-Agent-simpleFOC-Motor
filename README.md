@@ -69,7 +69,7 @@ S3 引脚禁区：`GPIO0/3/45/46`（strapping）、`19/20`（原生 USB）、`26
 - **只测屏幕、不碰电机**：双击同目录 `flash_stage0.bat`，烧 `ESP32S3_SimpleFOC_AS5600.STAGE0.bin`（STAGE 0 自检镜像），**不需要 12V、电机完全不上电**，专门用来调屏幕偏移与颜色。
 - **自行编译**：用 Arduino IDE 打开同目录 `.ino`，按上面菜单设置后上传。
 
-烧录前：**关闭 Arduino IDE 串口监视器、在上位机点「断开」**，释放串口；保持 12V 与三相线接好、**轴空转**，因为上电立即执行 `initFOC()` 对齐校准。若暂时没接 12V，校准会失败但固件**不会卡死**：电机输出被禁用、屏幕显示 `FOC FAIL`，`V/I/C/N/O` 屏幕校准命令与串口诊断仍可用；接好后按 RESET 即重新校准，无需重烧。
+烧录前：**关闭 Arduino IDE 串口监视器、在上位机点「断开」**，释放串口；保持 12V 与三相线接好、**轴空转**，因为上电立即执行 `initFOC()` 对齐校准。若暂时没接 12V，校准会失败但固件**不会卡死**：电机输出被禁用、屏幕显示 `FOC FAIL`，`V/I/C/N/O/Q/P` 屏幕校准命令与串口诊断仍可用；接好后按 RESET 即重新校准，无需重烧。
 
 串口 115200 应看到：
 
@@ -132,6 +132,8 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 | `I` / `C` | TFT 反色 INVON/INVOFF 切换 / RGB-BGR 顺序切换 |
 | `N` | TFT 背光开关 |
 | `O<col>,<row>` | TFT 显存偏移，例如 `O0,20`（画面整体错位时用） |
+| `Q<MHz>` | TFT 运行时换 SPI 速率并重新初始化，例如 `Q2` / `Q4` / `Q8` |
+| `P` | TFT 冻结 / 恢复 UI：只留一帧静态图，用于区分「初始化」与「持续刷新」问题 |
 
 ## 关键参数（`.ino` 顶部「只改这一区」）
 
@@ -143,7 +145,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 #define V_LIMIT      3.0f   // 实测 1V 带不动、3V 才转
 #define PHASE_R      10.0f  // 万用表量任意两相 ÷2
 // 弹簧：Kp 8.0 / Kd 0.20 / 死区 0.012 / 速度低通 0.05s / 下采样 3
-// TFT：GPIO 12/11/10/14/15/16，1MHz + GPIO 背光（Q<MHz> 可提速），240x284，10 FPS @ core 0
+// TFT：GPIO 12/11/10/14/15/16，4MHz + GPIO 背光（Q<MHz> 可换速），240x284，~6 FPS @ core 0
 ```
 
 ## 目录结构

@@ -29,7 +29,7 @@ echo     at once; it needs a powered, unloaded motor to calibrate correctly.
 echo   - Close the Arduino IDE Serial Monitor AND click Disconnect in the
 echo     HapticConsole web page to free the serial port.
 echo   - If 12V is off, initFOC will fail but the app stays alive: motor
-echo     outputs are disabled, screen shows FOC FAIL, and V/I/C/N/O screen
+echo     outputs are disabled, screen shows FOC FAIL, and V/I/C/N/O/Q/P screen
 echo     calibration commands still work. Wire 12V + phases, free the shaft,
 echo     then press RESET to retry calibration (no reflash needed).
 echo.
@@ -57,6 +57,9 @@ echo       Twist the shaft by hand, let go -> snaps back, no buzz at home.
 echo       M1 haptic / M0 velocity (T2 to spin) / T0 stops silently.
 echo       K stiffness / B damping / Z deadband / H re-zero / D diag.
 echo       Velocity idle: S1/S0 silent brake, G damping, J speed deadband.
+echo       TFT: splash holds 2.5s, then dashboard. V test / I invert / C RGB-BGR
+echo            / N backlight / O offset / Q speed / P freeze (A/B test).
+echo       Noise then black screen? Reflash the DC-fix firmware first.
 goto end
 
 :fail
