@@ -13,6 +13,8 @@ SimpleFOC 触觉旋钮整机外壳 —— Blender 5.3 参数化生成器
   stl/03_knob.stl         可选旋钮（滚花 + 轴孔 + 紧定螺钉孔）
   stl/04_motor_lock_plate.stl  ★ 电机锁板（与 02 顶盖二选一）：4 个精确铜柱孔
                           + 板底六角螺母沉腔，把电机 4 根铜柱真正锁死
+  stl/05_standalone_motor_plate.stl  ★ 独立小方板（完全脱离外壳）：60x60，
+                          同样 4 个铜柱孔 + 六角沉腔，四角通用安装孔
   render/01_assembled.png 成品渲染
   render/02_exploded.png  爆炸装配图
   render/03_interior.png  内部俯视（三块板卡堆放布局）
@@ -20,6 +22,8 @@ SimpleFOC 触觉旋钮整机外壳 —— Blender 5.3 参数化生成器
   render/05_lip.png       顶盖底面仰视特写（橙色标注四条直唇边 + 四角给螺柱让位）
   render/06_lock_plate.png 电机锁板爆炸示意（铜柱 / 锁板 / 六角螺母的锁止关系）
   render/07_lock_underside.png 锁板底面仰视（橙色高亮 4 个六角螺母沉腔）
+  render/08_standalone_plate.png 独立小方板顶面俯视（4 铜柱孔 + 4 安装孔 + 中心/线束孔）
+  render/09_standalone_underside.png 独立小方板底面仰视（六角沉腔 + 四角安装孔）
   Enclosure.blend         Blender 源文件（含参考体：电机/编码器/ESP32/驱动板/电源模块）
   build_report.txt        参数表、假设清单、BOM、装配步骤、网格自检
 
@@ -100,6 +104,18 @@ P = dict(
     # "round" = 4 个精确圆孔锁死（默认）；"slot" = 4 条径向长槽，免实测兼容孔距
     lock_hole_mode="round",
     lock_slot_r0=10.0, lock_slot_r1=22.0, lock_slot_w=6.0,
+
+    # ---- 05 独立电机小方板（完全脱离外壳，单独一块板锁住电机）----
+    # 铜柱孔 / 六角沉腔 / 长槽全部复用上面那组 lock_* 参数：量一次孔距，
+    # 04 锁板与 05 独立板一起对；这里只定义「板本身」的外形与安装方式。
+    # 与外壳没有任何装配关系：没有 110x76 轮廓、没有唇边、没有沉头孔位。
+    mini_w=60.0, mini_d=60.0, mini_t=5.0, mini_r=5.0,
+    # 四角安装孔：默认 (±25, ±25) 正好落在 R5 圆角圆心上，四周壁厚均匀 2.9mm。
+    # 用 M4 螺钉 + 螺母把板锁到桌面 / 支架 / 型材上；板尺寸改了要同步改这里。
+    mini_mount_d=4.2, mini_mount_x=25.0, mini_mount_y=25.0,
+    mini_axis_d=12.0,              # 中心让位孔（编码器磁铁 / 轴端）
+    mini_wire_d=9.0, mini_wire_xy=(0.0, -20.0),  # 三相线 + 编码器线过孔
+    mini_blend_x=150.0,            # .blend 里把独立板摆到底盒旁边，避免视觉重叠
 
     # ---- 可选旋钮 ----
     knob_d=38.0, knob_h=13.0, shaft_d=5.0,
@@ -635,6 +651,62 @@ def build_lock_plate(coll, mat):
 
 
 # ======================================================================
+#  零件 5：独立电机小方板（完全脱离外壳）
+# ======================================================================
+def build_standalone_plate(coll, mat):
+    """一块 60x60 的小方板，单独把电机 4 根铜柱锁死。
+
+    铜柱孔位 / 六角沉腔 / 长槽模式全部复用 04 锁板的 lock_* 参数，
+    所以量一次孔距，两块板一起对。区别只在「板本身」：
+      - 不用 case_w/case_d 轮廓，不加唇边，不加沉头螺钉孔；
+      - 底面 z=0，STL 以板底面为原点，切片软件可直接居中；
+      - 四角换成 4 个通用 Ø4.2 安装孔，用 M4 螺钉锁到任意平台；
+      - 不做电机沉台：电机由 4 根铜柱定位，平板上留线束孔更宽敞。
+    """
+    W, D, t = P["mini_w"], P["mini_d"], P["mini_t"]
+    plate = prism("05_standalone_motor_plate",
+                  rounded_rect_poly(W, D, P["mini_r"]), 0, t, coll)
+    cuts = []
+
+    # 中心让位孔（编码器磁铁 / 轴端）
+    cuts.append(cylinder("cut_mini_axis", P["mini_axis_d"] / 2, t + 6,
+                         0, 0, t / 2, coll=coll))
+
+    # ★ 4 根铜柱的锁止孔：与 04 锁板逐字相同
+    for a_deg in P["lock_post_angles"]:
+        a = math.radians(a_deg)
+        x, y = P["lock_post_r"] * math.cos(a), P["lock_post_r"] * math.sin(a)
+        if P["lock_hole_mode"] == "slot":
+            p0 = (P["lock_slot_r0"] * math.cos(a), P["lock_slot_r0"] * math.sin(a))
+            p1 = (P["lock_slot_r1"] * math.cos(a), P["lock_slot_r1"] * math.sin(a))
+            cuts.append(capsule("cut_mini_slot", p0, p1, P["lock_slot_w"],
+                                -2, t + 2, coll))
+        else:
+            cuts.append(cylinder("cut_mini_post", P["lock_hole_d"] / 2,
+                                 t + 6, x, y, t / 2, coll=coll))
+            # 板底六角沉腔：M3 螺母从下方压入，拧紧时不会跟着螺杆自转
+            cuts.append(prism("cut_mini_nut",
+                              hex_poly(x, y, P["lock_nut_af"], rot=30.0),
+                              -0.2, P["lock_nut_h"], coll))
+
+    # 三相线 + 编码器线过孔
+    cuts.append(cylinder("cut_mini_wire", P["mini_wire_d"] / 2, t + 6,
+                         P["mini_wire_xy"][0], P["mini_wire_xy"][1],
+                         t / 2, coll=coll))
+
+    # 四角通用安装孔：M4 螺钉 + 螺母把整块板锁到桌面 / 支架 / 型材
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            cuts.append(cylinder("cut_mini_mount", P["mini_mount_d"] / 2,
+                                 t + 6, sx * P["mini_mount_x"],
+                                 sy * P["mini_mount_y"], t / 2, coll=coll))
+
+    boolean(plate, cuts, 'DIFFERENCE')
+    shade(plate, mat)
+    return plate
+
+
+# ======================================================================
 #  零件 3：可选旋钮
 # ======================================================================
 def build_knob(coll, mat):
@@ -886,6 +958,7 @@ def main():
         steel=material("金属件", (0.62, 0.65, 0.70), 0.3, 0.8),
         brass=material("铜柱 - 黄铜", (0.78, 0.55, 0.18), 0.32, 0.75),
         lock=material("电机锁板 - 蓝灰", (0.26, 0.36, 0.48), 0.62),
+        mini=material("独立小方板 - 浅蓝灰", (0.48, 0.58, 0.68), 0.6),
         black=material("尼龙柱", (0.10, 0.10, 0.12), 0.7),
         pcb=material("PCB - 黑", (0.06, 0.13, 0.10), 0.65),
         pcb_blue=material("PCB - 深蓝", (0.07, 0.11, 0.22), 0.6),
@@ -901,15 +974,19 @@ def main():
     lower = build_lower(parts_coll, mats["case"])
     lid = build_lid(parts_coll, mats["lid"])
     lock = build_lock_plate(parts_coll, mats["lock"])
+    mini = build_standalone_plate(parts_coll, mats["mini"])
     knob = build_knob(parts_coll, mats["knob"])
     refs = build_references(ref_coll, mats)
 
     # 锁板与顶盖共用同一装配位（二选一打印），默认在渲染里隐藏，
     # 只在 06_lock_plate.png 里单独展示；.blend 里对象仍在，可手动切换可见性。
     lock.hide_render = True
+    # 独立小方板建模在 z=0..mini_t（STL 原点即板底面），与底盒空间重叠，
+    # 除了 08 / 09 两张专属渲染一律隐藏；保存 .blend 前再挪到底盒旁边。
+    mini.hide_render = True
 
     print("=== BUILD DONE ===")
-    for o in (lower, lid, lock, knob):
+    for o in (lower, lid, lock, mini, knob):
         st = mesh_stats(o)
         print("  %-18s tris=%5d nonmanifold=%d boundary=%d vol=%.1f cm3 dims=%s"
               % (o.name, st["tris"], st["nonmanifold"], st["boundary"],
@@ -921,6 +998,7 @@ def main():
         (lid, "02_top_cover.stl"),
         (knob, "03_knob.stl"),
         (lock, "04_motor_lock_plate.stl"),
+        (mini, "05_standalone_motor_plate.stl"),
     ]
     stl_report = []
     for o, fn in exports:
@@ -1095,6 +1173,84 @@ def main():
     for n in pocket_nuts:
         bpy.data.objects.remove(n, do_unlink=True)
 
+    # 独立小方板顶面（08）：纯板件俯视特写，把 4 个铜柱孔 / 4 个安装孔 /
+    # 中心让位 / 线束孔一次展示清楚。放电机示意件会挡住孔位，得不偿失；
+    # 装配关系由 06 锁板爆炸图（同一套孔位）+ build_report 说明。
+    saved3 = [(o, o.hide_render) for o in bpy.data.objects if o.type == 'MESH']
+    for o, _ in saved3:
+        o.hide_render = True
+    mini.hide_render = False
+    mini_mat = mini.data.materials[0]
+    mini.data.materials[0] = mats["lid"]       # 临时深灰，孔透出浅背景更醒目
+    mini_posts = [(P["lock_post_r"] * math.cos(math.radians(a)),
+                   P["lock_post_r"] * math.sin(math.radians(a)))
+                  for a in P["lock_post_angles"]]
+    bpy.ops.object.light_add(type='AREA', location=(20, -30, 90))
+    top_light = bpy.context.object
+    top_light.name = "RENDER_ONLY_mini_top_light"
+    top_light.data.energy = 3600
+    top_light.data.shape = 'DISK'
+    top_light.data.size = 120
+    # 接近正上方俯视：板正立、四角完整入画；纯几何特写，不放文字标签
+    # （标签与孔位抢空间，正俯视下反而看不清板；说明交给 build_report）。
+    r_mini = render(os.path.join(RENDER_DIR, "08_standalone_plate.png"), cam,
+                    (0, -6, 140), (0, 0, 2), ortho=100)
+    print("  RENDER mini", r_mini)
+    bpy.data.objects.remove(top_light, do_unlink=True)
+    mini.data.materials[0] = mini_mat
+    for o, v in saved3:
+        o.hide_render = v
+
+    # 独立板底面仰视（09）：橙色 4 个六角沉腔 + 深色螺母 + 四角安装孔。
+    mdup = mini.copy()
+    mdup.data = mini.data.copy()
+    mdup.name = "RENDER_ONLY_mini_pockets"
+    parts_coll.objects.link(mdup)
+    mdup.data.materials.clear()
+    mdup.data.materials.append(mats["inspect"])
+    mdup.data.materials.append(mats["pocket"])
+    for poly in mdup.data.polygons:
+        vv = [mdup.data.vertices[i].co for i in poly.vertices]
+        cx = sum(v.x for v in vv) / len(vv)
+        cy = sum(v.y for v in vv) / len(vv)
+        cz = sum(v.z for v in vv) / len(vv)
+        if (cz < P["lock_nut_h"] + 0.25
+                and any(math.hypot(cx - px, cy - py) < 4.0
+                        for px, py in mini_posts)):
+            poly.material_index = 1
+    mini_nuts = []
+    for px, py in mini_posts:
+        n = prism("TMP_mini_pocket_nut", hex_poly(px, py, 5.5, rot=30.0),
+                  0.1, 2.5, helper)
+        boolean(n, [cylinder("TMP_mini_pocket_bore", 1.7, 6.0, px, py,
+                             1.3, coll=helper)], 'DIFFERENCE')
+        shade(n, mats["black"])
+        mini_nuts.append(n)
+    saved4 = [(o, o.hide_render) for o in bpy.data.objects if o.type == 'MESH']
+    for o, _ in saved4:
+        o.hide_render = True
+    mdup.hide_render = False
+    for n in mini_nuts:
+        n.hide_render = False
+    bpy.ops.object.light_add(type='AREA', location=(0, 0, -60))
+    under = bpy.context.object
+    under.name = "RENDER_ONLY_mini_light"
+    under.rotation_euler[0] = math.pi
+    under.data.energy = 3200
+    under.data.shape = 'DISK'
+    under.data.size = 150
+    r_mini_under = render(os.path.join(RENDER_DIR, "09_standalone_underside.png"),
+                          cam, (0, -8, -130), (0, 0, 2), ortho=105)
+    print("  RENDER mini underside", r_mini_under)
+    bpy.data.objects.remove(under, do_unlink=True)
+    for o, v in saved4:
+        o.hide_render = v
+    mdup_mesh = mdup.data
+    bpy.data.objects.remove(mdup, do_unlink=True)
+    bpy.data.meshes.remove(mdup_mesh)
+    for n in mini_nuts:
+        bpy.data.objects.remove(n, do_unlink=True)
+
     # 内部俯视：隐藏顶盖 / 电机 / 旋钮 / 地面
     hidden = [lid, knob, refs["motor"], refs["disc"], refs["shaft"],
               refs["encoder"], refs["pillars"], ground]
@@ -1150,6 +1306,9 @@ def main():
         o.location = loc
 
     # ---- 保存 .blend（装配状态）----
+    # STL 已按原点导出；这里把独立板摆到底盒旁边，打开 .blend 时能一眼看出
+    # 它不属于外壳，也不会和底盒 / 锁板在视口里叠在一起。
+    mini.location = Vector((P["mini_blend_x"], 0, 0))
     aim(cam, (150, -170, 125), (0, 0, 34))
     blend_path = os.path.join(OUT, "Enclosure.blend")
     bpy.ops.wm.save_as_mainfile(filepath=blend_path)
@@ -1158,7 +1317,7 @@ def main():
     # ---- 报告 ----
     write_report(stl_report, blend_path,
                  (r_assembled, r_exploded, r_interior, r_fit, r_lip,
-                  r_lock, r_pocket))
+                  r_lock, r_pocket, r_mini, r_mini_under))
     print("=== ALL DONE ===")
 
 
@@ -1262,6 +1421,35 @@ def write_report(stl_report, blend_path, renders):
     A("  装配示意见 render/06_lock_plate.png（爆炸展示铜柱 / 锁板 / 六角螺母）；")
     A("  板底 4 个六角沉腔见 render/07_lock_underside.png（橙色为渲染标注色，打印件单色）。")
     A("")
+    mw, md, mt = P["mini_w"], P["mini_d"], P["mini_t"]
+    mx, my = P["mini_mount_x"], P["mini_mount_y"]
+    corner_c = (mw / 2 - P["mini_r"], md / 2 - P["mini_r"])
+    mount_wall = (P["mini_r"] - math.hypot(mx - corner_c[0], my - corner_c[1])
+                  - P["mini_mount_d"] / 2)
+    A("【05 独立电机小方板 —— 完全脱离外壳】（本次新增）")
+    A("  * 定位：不装进 110x76 底盒，不用外壳轮廓 / 唇边 / 沉头螺钉孔，就是单独一块")
+    A("    %.1f x %.1f x %.1f mm 小方板：4 根铜柱锁死电机，四角安装孔把板锁到任意平台。"
+      % (mw, md, mt))
+    A("    与 01~04 没有任何装配关系，打印这一块就能用，不必打印外壳。")
+    A("  * 铜柱孔位与 04 锁板逐字共用 lock_post_r / lock_hole_d / lock_nut_af /")
+    A("    lock_post_angles / lock_hole_mode：实测一次孔距，两块板一起对准，改一处即可。")
+    A("    孔位 (±%.2f, ±%.2f)，相邻 %.2f / 对角 %.2f mm；"
+      % (lr / math.sqrt(2), lr / math.sqrt(2), lr * math.sqrt(2), 2 * lr))
+    A("    板底同样是 对边 %.1f、深 %.1f 的六角沉腔，M3 螺母嵌进去不能自转。"
+      % (P["lock_nut_af"], P["lock_nut_h"]))
+    A("  中心 Ø%.1f 让位孔、Ø%.1f 线束过孔 (%.1f, %.1f)、四角圆角 R%.1f。"
+      % (P["mini_axis_d"], P["mini_wire_d"], *P["mini_wire_xy"], P["mini_r"]))
+    A("  四角 Ø%.1f 安装孔 (±%.1f, ±%.1f) 落在圆角圆心，四周最小壁厚 %.2f mm："
+      % (P["mini_mount_d"], mx, my, mount_wall))
+    A("    M4 螺钉 + 螺母把板锁到桌面 / 支架 / 铝型材；也可换成尼龙柱把板架高。")
+    A("  STL 以板底面为 z=0 原点，包围盒 %.1f x %.1f x %.1f，切片软件可直接居中。"
+      % (mw, md, mt))
+    A("  ★ 改板尺寸时同步改 mini_mount_x / mini_mount_y = mini_w/2 - mini_r（保持落在圆角圆心），")
+    A("    否则安装孔会切穿圆角边；verify_fit.py 会自动检查这个壁厚。")
+    A("  顶面孔位布局见 render/08_standalone_plate.png（纯板件俯视，不装外壳）；")
+    A("  板底六角沉腔与四角安装孔见 render/09_standalone_underside.png（橙色为渲染标注色）；")
+    A("  装配关系与 04 锁板完全相同，可对照 render/06_lock_plate.png 的爆炸示意。")
+    A("")
     A("【STL 自检】")
     total_bad = 0
     for fn, size, st in stl_report:
@@ -1278,6 +1466,10 @@ def write_report(stl_report, blend_path, renders):
       % (P["ref_pillar_d"], P["ref_pillar_h"], P["ref_pillar_r"]))
     A("  - ★ 锁板孔位 R=%.1f 与铜柱同按照片估算：打印前务必实测对角孔距并改 lock_post_r，"
       "否则 4 个孔会对不上实物铜柱。" % lr)
+    A("  - 05 独立板 %.1f x %.1f x %.1f mm 是纯自定义尺寸（不是实物量测值）："
+      % (P["mini_w"], P["mini_d"], P["mini_t"]))
+    A("    改 mini_w / mini_d 时同步改 mini_mount_x / mini_mount_y = 边长/2 - mini_r，")
+    A("    让四角安装孔始终落在圆角圆心，避免切穿圆角边。")
     A("  - 轴径 Ø%.1f（旋钮孔径），M3 紧定螺钉横孔 Ø%.1f"
       % (P["shaft_d"], P["set_screw_d"]))
     A("  - ESP32-S3 板 USB-C 端中心高度 z=%.1f；BOOT/RESET 针孔位置按常见 DevKitC-1 估计。" % P["usb_z"])
@@ -1295,14 +1487,17 @@ def write_report(stl_report, blend_path, renders):
     A("  【用 02 顶盖】M3 螺母 + Ø10 垫片 x4（长槽只让位，电机仍可滑动）")
     A("  【用 04 锁板】M3 六角螺母 x4（嵌进板底六角沉腔，防转锁死；")
     A("                 若铜柱是内螺纹 standoff 则改 M3x10 螺钉 x4）")
+    A("  【用 05 独立板】M3 六角螺母 x4（板底沉腔）+ M4x12 螺钉与螺母 x4")
+    A("                 （四角 Ø%.1f 孔把板锁到平台；也可换 M3 + 垫片）" % P["mini_mount_d"])
     A("  橡胶脚垫 Ø8 x4、少量热熔胶（固定线束）、扎带 x2")
     A("  USB-C 数据线 x1、12V 电源线 x1（从 +X 出线孔引出）")
     A("")
     A("【打印建议】")
     A("  PLA 或 PETG；层高 0.2 mm；填充 20%；壁 3 圈；底盒开口朝上打印，无需支撑。")
     A("  顶盖沉台朝上；旋钮竖放（轴孔垂直），滚花朝外。")
-    A("  04 锁板底面（六角沉腔面）朝下打印：沉腔上方是跨度 %.1f mm 的短桥，"
+    A("  04 锁板 / 05 独立板底面（六角沉腔面）朝下打印：沉腔上方是跨度 %.1f mm 的短桥，"
       "PLA 可直接桥接免支撑；若切片软件自动加支撑也很好拆。" % P["lock_nut_af"])
+    A("  05 独立板平放打印即可（两面都是平面），是最容易打印的一个零件。")
     A("  螺柱自攻孔 Ø2.6 若太紧可用 M3 丝锥或 3.0 钻头轻扩。")
     A("")
     A("【装配顺序】")
@@ -1319,17 +1514,25 @@ def write_report(stl_report, blend_path, renders):
       "螺柱顶面是否有毛刺或唇边是否被切片机加了支撑/大象脚。")
     A("  5. 白色转盘即现成旋钮；若要更大握持感，套上 03_knob.stl 并用 M3 紧定螺钉固定。")
     A("")
+    A("【只要固定电机、不装外壳时】只打印 05_standalone_motor_plate.stl：")
+    A("  1) 4 个 M3 六角螺母按进板底六角沉腔；2) 电机 4 根铜柱从板顶穿过 Ø3.4 孔，")
+    A("  拧紧锁死；3) 三相线 / 编码器线从 Ø9 线束孔引出；4) 四角 Ø4.2 孔用 M4")
+    A("  螺钉把整块板锁到桌面、支架或铝型材上。板本身不依附外壳，位置随意。")
+    A("")
     A("【与固件的配合 / 安全】")
     A("  - 上电 initFOC() 会让电机正反各走一个电周期，务必让旋钮自由、别用手捏住。")
     A("  - 校准需 12V 与三相线都接好；失败会打印 Failed to notice movement 并卡住，按 RESET 重来。")
     A("  - 手扭住不放时电机持续堵转输出，MP6536 会发热，不用时发 T0 并断 12V。")
     A("  - 重烧固件前关闭上位机 / IDE 串口监视器，释放串口。")
-    A("  - 本外壳与之前的 MountBracket 三板支架是两套独立方案，二选一即可。")
+    A("  - 机械件共三套独立方案：MountBracket 三板支架 / 01~04 整机外壳 / 05 独立小方板，")
+    A("    按需要选一套打印即可；05 与外壳没有任何装配关系。")
     A("")
     A("【渲染图】")
     for name, size in zip(("01_assembled.png", "02_exploded.png",
                            "03_interior.png", "04_fit.png", "05_lip.png",
-                           "06_lock_plate.png", "07_lock_underside.png"), renders):
+                           "06_lock_plate.png", "07_lock_underside.png",
+                           "08_standalone_plate.png",
+                           "09_standalone_underside.png"), renders):
         A("  render/%-20s %7d bytes" % (name, size))
     A("  源文件 %s (%d bytes)" % (os.path.basename(blend_path), os.path.getsize(blend_path)))
     A("")

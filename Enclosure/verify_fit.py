@@ -215,8 +215,83 @@ def main():
         chk("04_motor_lock_plate.stl 存在", False,
             "未找到锁板 STL，请先跑 regen.bat")
 
+    # ---- 05 独立电机小方板（完全脱离外壳）----
+    mini_path = os.path.join(HERE, "stl", "05_standalone_motor_plate.stl")
+    if os.path.exists(mini_path):
+        mini = read_stl(mini_path)
+        mw, md, mt = P["mini_w"], P["mini_d"], P["mini_t"]
+        body = segments(mini, mt / 2)
+        mbb = bbox(body)
+        chk("独立板在 z=mini_t/2 有实体", bool(body),
+            "截面线段 %d 条" % len(body))
+        if mbb:
+            chk("独立板外形 %.1f x %.1f（不沿用外壳 110x76）" % (mw, md),
+                abs(mbb[1] - mw / 2) < tol and abs(mbb[3] - md / 2) < tol,
+                "实测 X±%.2f / Y±%.2f" % (mbb[1], mbb[3]))
+        below = segments(mini, -0.5)
+        above_m = segments(mini, mt + 0.5)
+        chk("独立板底面 z=0 平齐：板下无唇边 / 无凸出", not below,
+            "z=-0.5 截面线段 %d 条" % len(below))
+        chk("独立板顶面 z=mini_t 以上无材料", not above_m,
+            "z=%.1f 截面线段 %d 条" % (mt + 0.5, len(above_m)))
+
+        ar = hole_radius(body, 0, 0, lo=4.0, hi=9.0)
+        chk("中心 Ø%.1f 让位孔贯通" % P["mini_axis_d"],
+            ar is not None and abs(ar - P["mini_axis_d"] / 2) < 0.15,
+            "实测半径 %s" % ("%.2f" % ar if ar else "NONE"))
+
+        mr = [hole_radius(body, sx * P["mini_mount_x"], sy * P["mini_mount_y"])
+              for sx in (-1, 1) for sy in (-1, 1)]
+        chk("四角 4 个 Ø%.1f 安装孔" % P["mini_mount_d"],
+            all(r is not None and abs(r - P["mini_mount_d"] / 2) < 0.15
+                for r in mr),
+            "实测半径 %s" % ", ".join("%.2f" % r if r else "NONE" for r in mr))
+        cc = (mw / 2 - P["mini_r"], md / 2 - P["mini_r"])
+        wall_min = (P["mini_r"]
+                    - math.hypot(P["mini_mount_x"] - cc[0],
+                                 P["mini_mount_y"] - cc[1])
+                    - P["mini_mount_d"] / 2)
+        chk("四角安装孔完整落在圆角内，不切穿板边", wall_min > 0.8,
+            "最小壁厚 %.2f mm > 0.8 mm" % wall_min)
+
+        mposts = [(P["lock_post_r"] * math.cos(math.radians(a)),
+                   P["lock_post_r"] * math.sin(math.radians(a)))
+                  for a in P["lock_post_angles"]]
+        if P["lock_hole_mode"] == "round":
+            upper = segments(mini, P["lock_nut_h"] + 0.5)
+            rr = [hole_radius(upper, x, y) for x, y in mposts]
+            chk("独立板 4 个铜柱过孔 Ø%.1f 与锁板一致" % P["lock_hole_d"],
+                all(r is not None and abs(r - P["lock_hole_d"] / 2) < 0.15
+                    for r in rr),
+                "实测半径 %s" % ", ".join("%.2f" % r if r else "NONE" for r in rr))
+            nut = segments(mini, 0.5)
+            hr = [hole_radius(nut, x, y) for x, y in mposts]
+            chk("独立板板底 4 个六角螺母沉腔（防转）",
+                all(r is not None
+                    and r > P["lock_hole_d"] / 2 + 0.8
+                    and r <= P["lock_nut_af"] / math.sqrt(3.0) + 0.2
+                    for r in hr),
+                "实测腔半径 %s（过孔 %.2f）"
+                % (", ".join("%.2f" % r if r else "NONE" for r in hr),
+                   P["lock_hole_d"] / 2))
+        else:
+            chk("独立板为长槽模式（与锁板一致）", True,
+                "lock_hole_mode='slot'，量准孔距后改回 'round'")
+        chk("独立板孔距与锁板 / 参考铜柱一致",
+            abs(P["lock_post_r"] - P["ref_pillar_r"]) < tol,
+            "lock_post_r=%.2f / ref_pillar_r=%.2f"
+            % (P["lock_post_r"], P["ref_pillar_r"]))
+        wx, wy = P["mini_wire_xy"]
+        wr = hole_radius(body, wx, wy, lo=2.0, hi=7.0)
+        chk("线束过孔 Ø%.1f" % P["mini_wire_d"],
+            wr is not None and abs(wr - P["mini_wire_d"] / 2) < 0.15,
+            "实测半径 %s" % ("%.2f" % wr if wr else "NONE"))
+    else:
+        chk("05_standalone_motor_plate.stl 存在", False,
+            "未找到独立板 STL，请先跑 regen.bat")
+
     print("=" * 74)
-    print(" 顶盖 / 底盒 / 电机锁板 配合校验")
+    print(" 顶盖 / 底盒 / 电机锁板 / 独立小方板 配合校验")
     print("=" * 74)
     for name, ok, detail in checks:
         print("  [%s] %-38s %s" % ("PASS" if ok else "FAIL", name, detail))
