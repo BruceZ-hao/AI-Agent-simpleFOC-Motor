@@ -14,6 +14,8 @@ SimpleFOC 触觉旋钮整机外壳 —— Blender 5.3 参数化生成器
   render/01_assembled.png 成品渲染
   render/02_exploded.png  爆炸装配图
   render/03_interior.png  内部俯视（三块板卡堆放布局）
+  render/04_fit.png       结合细节（顶盖抬高，正交展示口沿 / 螺柱 / 同宽外形）
+  render/05_lip.png       顶盖底面仰视特写（橙色标注四条直唇边 + 四角给螺柱让位）
   Enclosure.blend         Blender 源文件（含参考体：电机/编码器/ESP32/驱动板/电源模块）
   build_report.txt        参数表、假设清单、BOM、装配步骤、网格自检
 
@@ -41,7 +43,10 @@ P = dict(
     # ---- 外形 ----
     case_w=110.0, case_d=76.0, case_h=36.0,
     wall=2.4, floor_t=2.4, corner_r=6.0,
-    lid_t=3.0, lip_h=2.0, lip_gap=0.4,
+    # 结合方式：底盒 z=H 处是平齐口沿，顶盖底面同高、整面贴合；
+    # 四条直唇边插入内腔起 XY 定位作用，四角让位给螺柱。
+    lid_t=3.0,
+    lip_h=2.0, lip_gap=0.4, lip_w=2.0, lip_post_clear=0.3,
 
     # ---- 四角螺柱 / 沉头螺钉 ----
     post_x=49.0, post_y=32.0,
@@ -169,7 +174,13 @@ def cylinder(name, r, h, cx, cy, cz, verts=None, rot=None, coll=None):
 
 
 def rounded_box(name, w, d, h, cx, cy, z0, r, coll=None):
-    """圆角长方体，底面在 z0。"""
+    """【已弃用，勿用于装配面】整盒 BEVEL 圆角。
+
+    薄件（如 3mm 顶盖）的圆角宽度会被 clamp，上下表面被削成斜面，
+    盒口平面消失、外轮廓缩小到比内腔还窄，顶盖与底盒无法贴合。
+    外壳 / 顶盖一律用 prism(rounded_rect_poly(...)) 生成精确圆角棱柱。
+    此函数仅为历史参考保留。
+    """
     o = box(name, w, d, h, cx, cy, z0 + h / 2, coll)
     be = o.modifiers.new("outer_round", 'BEVEL')
     be.width = r
@@ -213,8 +224,14 @@ def prism(name, poly, z0, z1, coll=None):
     return o
 
 
-def rounded_rect_poly(w, d, r, seg=8):
-    """XY 平面圆角矩形轮廓（CCW），用于内腔与唇边，避免直角与外圆角相交出碎面。"""
+def rounded_rect_poly(w, d, r, seg=None):
+    """XY 平面圆角矩形轮廓（CCW），用于外形 / 内腔 / 唇边。
+
+    所有轮廓必须共用同一 seg 和同一圆角圆心，否则外框、内腔、唇边
+    在角部是不同多边形近似的圆弧，配合间隙会忽大忽小甚至干涉。
+    """
+    if seg is None:
+        seg = P["corner_seg"] * 2
     pts = []
     for cx, cy, a0 in ((w / 2 - r, d / 2 - r, 0),
                        (-w / 2 + r, d / 2 - r, 90),
@@ -351,7 +368,11 @@ def write_stl(obj, path):
 def build_lower(coll, mat):
     W, D, H = P["case_w"], P["case_d"], P["case_h"]
     wall, ft = P["wall"], P["floor_t"]
-    shell = rounded_box("01_lower_case", W, D, H, 0, 0, 0, P["corner_r"], coll)
+    # 精确圆角棱柱：侧壁一直垂直延伸到 z=H，盒口留出平齐环形承托面。
+    # 不能用 BEVEL 削整个盒子 —— 3mm 量级的圆角会把薄壁顶/底面削成斜面，
+    # 外轮廓在盒口处缩小到比内腔还小，侧壁被内腔切穿，顶盖无处落脚。
+    shell = prism("01_lower_case", rounded_rect_poly(W, D, P["corner_r"]),
+                  0, H, coll)
 
     # --- 第一批差集：内腔 + 侧壁开口 + 脚垫凹坑 ---
     cuts = []
@@ -425,15 +446,30 @@ def build_lower(coll, mat):
 def build_lid(coll, mat):
     W, D, H = P["case_w"], P["case_d"], P["case_h"]
     wall, lt = P["wall"], P["lid_t"]
-    lid = rounded_box("02_top_cover", W, D, lt, 0, 0, H, P["corner_r"], coll)
+    # 与底盒完全相同的 XY 圆角轮廓：叠装后侧面齐平，底面 z=H 是完整平面，
+    # 正好压在底盒口沿 + 四角螺柱顶面上（三者共面，零缝贴合）。
+    lid = prism("02_top_cover", rounded_rect_poly(W, D, P["corner_r"]),
+                H, H + lt, coll)
 
-    # 下表面定位唇边（插入底盒内腔）
-    lip = prism("lip",
-                rounded_rect_poly(W - 2 * wall - 2 * P["lip_gap"],
-                                  D - 2 * wall - 2 * P["lip_gap"],
-                                  P["corner_r"] - wall - P["lip_gap"]),
-                H - P["lip_h"], H + 0.4, coll)
-    boolean(lid, [lip], 'UNION')
+    # 定位唇边 = 四条直条，插入内腔 lip_h mm，单边留 lip_gap 间隙。
+    # 四角必须空出来：螺柱顶面 z=H 要直接顶住顶盖底面当支撑，
+    # 唇边若连到角上就与螺柱实体重叠，顶盖压不下去。
+    gap, lw = P["lip_gap"], P["lip_w"]
+    ox = W / 2 - wall - gap
+    oy = D / 2 - wall - gap
+    clear = P["post_od"] / 2 + P["lip_post_clear"]
+    len_x = 2 * (P["post_x"] - clear)
+    len_y = 2 * (P["post_y"] - clear)
+    strips = []
+    for sy in (-1, 1):
+        strips.append(box("lip_x", len_x, lw, P["lip_h"] + 0.4,
+                          0, sy * (oy - lw / 2),
+                          H - P["lip_h"] / 2 + 0.2, coll))
+    for sx in (-1, 1):
+        strips.append(box("lip_y", lw, len_y, P["lip_h"] + 0.4,
+                          sx * (ox - lw / 2), 0,
+                          H - P["lip_h"] / 2 + 0.2, coll))
+    boolean(lid, strips, 'UNION')
 
     top = H + lt
     cuts = []
@@ -739,6 +775,7 @@ def main():
         chip=material("芯片", (0.12, 0.12, 0.14), 0.45),
         ground=material("地面", (0.70, 0.73, 0.77), 0.9),
         inspect=material("检视 - 浅灰", (0.52, 0.57, 0.63), 0.8),
+        lip=material("定位唇边 - 高亮（仅渲染标注）", (0.95, 0.62, 0.15), 0.5),
         text=material("标注", (0.10, 0.12, 0.16), 0.8),
     )
 
@@ -773,6 +810,56 @@ def main():
     r_assembled = render(os.path.join(RENDER_DIR, "01_assembled.png"), cam,
                          (150, -170, 125), (0, 0, 34))
     print("  RENDER assembled", r_assembled)
+
+    # 结合细节：顶盖抬高、正交低视角，露出口沿 / 四角螺柱 / 顶盖下方四条唇边。
+    # 正交投影避免"抬高的顶盖看起来比底盒大"的透视误导；底盒临时换浅色便于看清口沿。
+    fit_hidden = [knob, refs["motor"], refs["disc"], refs["shaft"],
+                  refs["encoder"], refs["pillars"], ground]
+    for o in fit_hidden:
+        o.hide_render = True
+    case_mat = lower.data.materials[0]
+    lower.data.materials[0] = mats["inspect"]
+    lid.location += Vector((0, 0, 22))
+    r_fit = render(os.path.join(RENDER_DIR, "04_fit.png"), cam,
+                   (150, -180, 150), (0, 0, 38), ortho=170)
+    print("  RENDER fit", r_fit)
+    lid.location -= Vector((0, 0, 22))
+    lower.data.materials[0] = case_mat
+    for o in fit_hidden:
+        o.hide_render = False
+
+    # 唇边特写：复制顶盖，把 z<36 的唇边面临时上高亮色，从下方仰视。
+    # 唇边与本体同色时均匀光下几乎看不出轮廓，上色后四条直条与四角空位一目了然。
+    # 只改渲染副本，不影响导出的 STL / .blend 里的实际材质。
+    dup = lid.copy()
+    dup.data = lid.data.copy()
+    dup.name = "RENDER_ONLY_lip_highlight"
+    parts_coll.objects.link(dup)
+    dup.data.materials.clear()
+    dup.data.materials.append(mats["inspect"])
+    dup.data.materials.append(mats["lip"])
+    for poly in dup.data.polygons:
+        if min(dup.data.vertices[i].co.z for i in poly.vertices) < P["case_h"] - 0.01:
+            poly.material_index = 1
+    saved = [(o, o.hide_render) for o in bpy.data.objects if o.type == 'MESH']
+    for o, _ in saved:
+        o.hide_render = (o != dup)
+    bpy.ops.object.light_add(type='AREA', location=(0, 0, -70))
+    under = bpy.context.object
+    under.name = "RENDER_ONLY_under_light"
+    under.rotation_euler[0] = math.pi      # 面光朝 +Z，照亮顶盖下表面
+    under.data.energy = 2200
+    under.data.shape = 'DISK'
+    under.data.size = 160
+    r_lip = render(os.path.join(RENDER_DIR, "05_lip.png"), cam,
+                   (30, -40, -110), (0, 0, 36), ortho=140)
+    print("  RENDER lip", r_lip)
+    bpy.data.objects.remove(under, do_unlink=True)
+    for o, v in saved:
+        o.hide_render = v
+    dup_mesh = dup.data
+    bpy.data.objects.remove(dup, do_unlink=True)
+    bpy.data.meshes.remove(dup_mesh)
 
     # 内部俯视：隐藏顶盖 / 电机 / 旋钮 / 地面
     hidden = [lid, knob, refs["motor"], refs["disc"], refs["shaft"],
@@ -835,7 +922,8 @@ def main():
     print("  BLEND", os.path.getsize(blend_path))
 
     # ---- 报告 ----
-    write_report(stl_report, blend_path, (r_assembled, r_exploded, r_interior))
+    write_report(stl_report, blend_path,
+                 (r_assembled, r_exploded, r_interior, r_fit, r_lip))
     print("=== ALL DONE ===")
 
 
@@ -855,9 +943,38 @@ def write_report(stl_report, blend_path, renders):
     A("【外形】")
     A("  底盒   %.1f x %.1f x %.1f mm（壁厚 %.1f，底厚 %.1f，圆角 R%.1f）"
       % (W, D, H, P["wall"], P["floor_t"], P["corner_r"]))
-    A("  顶盖   %.1f x %.1f x %.1f mm，带 %.1f mm 定位唇边" % (W, D, P["lid_t"], P["lip_h"]))
+    A("  顶盖   %.1f x %.1f x %.1f mm，与底盒共用同一 XY 圆角轮廓，叠装后侧面齐平"
+      % (W, D, P["lid_t"]))
     A("  总高（含电机与白色转盘，不含旋钮）约 %.1f mm" % (top + P["ref_enc_t"] + P["ref_motor_h"] + P["ref_disc_h"]))
     A("  电子层内净高 %.1f mm；电机装在顶盖上方，散热好、装配简单。" % (H - P["floor_t"]))
+    A("")
+    gap = P["lip_gap"]
+    lip_ox = W / 2 - P["wall"] - gap
+    lip_oy = D / 2 - P["wall"] - gap
+    clear = P["post_od"] / 2 + P["lip_post_clear"]
+    len_x = 2 * (P["post_x"] - clear)
+    len_y = 2 * (P["post_y"] - clear)
+    A("【顶盖 / 底盒结合逻辑】（本次修复重点）")
+    A("  1) 底盒侧壁垂直一直到 z=%.1f，内腔 %.1f x %.1f 贯通到盒口，"
+      % (H, W - 2 * P["wall"], D - 2 * P["wall"]))
+    A("     剩下 %.1f mm 宽的平齐环形口沿；四角 Ø%.1f 螺柱顶面也在 z=%.1f，"
+      "与口沿共面。" % (P["wall"], P["post_od"], H))
+    A("  2) 顶盖底面 z=%.1f 是完整平面，同时压在口沿和 4 个螺柱顶面上，零缝贴合。" % H)
+    A("     外形与底盒完全一致（R%.1f 同心圆角），不会一角多出、一角缺料。" % P["corner_r"])
+    A("  3) 定位靠顶盖下方 4 条直唇边：宽 %.1f、插入 %.1f mm，"
+      "外边界 X±%.1f / Y±%.1f，与内腔壁单边留 %.1f mm 间隙。"
+      % (P["lip_w"], P["lip_h"], lip_ox, lip_oy, gap))
+    A("     唇边长度 X %.1f / Y %.1f，两端止于螺柱避让半径 %.1f，四角完全空出，"
+      "不与螺柱干涉。" % (len_x, len_y, clear))
+    A("  4) 4 颗 M3x12 沉头螺钉穿过顶盖 Ø%.1f 过孔 + Ø%.1f 沉头孔，"
+      "拧进螺柱 Ø%.1f 自攻孔，把顶盖压紧在口沿上。"
+      % (P["lid_screw_d"], P["lid_cs_d"], P["post_hole_d"]))
+    A("  * 旧版用 BEVEL 削整个外壳：%.1f mm 薄板的圆角被 clamp 成上下斜切，"
+      "盒口外轮廓反而比内腔小，侧壁被切穿，顶盖无处落脚；" % P["lid_t"])
+    A("    唇边又是一整块实心板并压在螺柱上，顶盖根本盖不下去。现改为精确圆角棱柱"
+      " + 平齐口沿 + 四条让位唇边。")
+    A("  * 配合见 render/04_fit.png（抬升正交视图）；唇边与四角让位见 "
+      "render/05_lip.png（顶盖底面仰视，橙色为唇边标注色）。配合数值由 verify_fit.py 自动复验。")
     A("")
     A("【四个关键结构】")
     A("  1) 底盒内腔是完整平底：不做垫台 / 挡边 / 板卡槽，三块板排针朝下直接堆放，位置自由。")
@@ -925,7 +1042,10 @@ def write_report(stl_report, blend_path, renders):
     A("  2. 开关装进 +X 侧壁开孔；12V 电源线从 Ø8 出线孔穿入，经开关到电源模块，")
     A("     模块输出再分给驱动板 VIN 与 ESP32；三相线 + 编码器线从顶盖 Ø9 过孔穿入。")
     A("  3. 电机 4 根支撑柱对准顶盖长槽插入，从盒内侧用螺母/垫片或螺钉锁紧。")
-    A("  4. 盖上顶盖（唇边插入内腔），四角拧入 M3x12 沉头螺钉。")
+    A("  4. 盖上顶盖：四条唇边对准内腔插入，底面压平在口沿与四个螺柱顶面上，"
+      "四角拧入 M3x12 沉头螺钉。")
+    A("     先不拧死、试合一次：顶盖应能整面落到底、四周无缝，若有顶手就检查"
+      "螺柱顶面是否有毛刺或唇边是否被切片机加了支撑/大象脚。")
     A("  5. 白色转盘即现成旋钮；若要更大握持感，套上 03_knob.stl 并用 M3 紧定螺钉固定。")
     A("")
     A("【与固件的配合 / 安全】")
@@ -936,7 +1056,8 @@ def write_report(stl_report, blend_path, renders):
     A("  - 本外壳与之前的 MountBracket 三板支架是两套独立方案，二选一即可。")
     A("")
     A("【渲染图】")
-    for name, size in zip(("01_assembled.png", "02_exploded.png", "03_interior.png"), renders):
+    for name, size in zip(("01_assembled.png", "02_exploded.png",
+                           "03_interior.png", "04_fit.png", "05_lip.png"), renders):
         A("  render/%-20s %7d bytes" % (name, size))
     A("  源文件 %s (%d bytes)" % (os.path.basename(blend_path), os.path.getsize(blend_path)))
     A("")

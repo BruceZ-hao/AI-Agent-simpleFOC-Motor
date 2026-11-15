@@ -21,8 +21,17 @@ if not exist "%BLENDER%" (
   exit /b 1
 )
 "%BLENDER%" --background --factory-startup --python "%~dp0enclosure.py"
+set "BLENDER_RC=%ERRORLEVEL%"
 echo.
-if errorlevel 1 (
+where python >nul 2>&1
+if not errorlevel 1 (
+  python "%~dp0verify_stl.py"
+  python "%~dp0verify_fit.py"
+) else (
+  echo [SKIP] Python not found - run verify_stl.py / verify_fit.py manually.
+)
+echo.
+if not "%BLENDER_RC%"=="0" (
   echo [FAILED] See messages above.
 ) else (
   echo [OK] STL / renders / Enclosure.blend / build_report.txt refreshed.

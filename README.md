@@ -87,7 +87,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 ### 4. 装机械件
 
 - **开放式台架**：`MountBracket/stl/` 5 个 STL，三块板 + 4 根 M3 长螺杆，AS5600 气隙靠螺母微调。
-- **整机外壳**：`Enclosure/stl/` 3 个 STL（底盒 / 顶盖 / 滚花旋钮），`Enclosure/render/` 有装配、爆炸、内部三张渲染图。底盒是**完整平底、无板卡槽**——三块板排针朝下直接堆放，并带 50×35mm 电源模块位置与侧边电源开关口。
+- **整机外壳**：`Enclosure/stl/` 3 个 STL（底盒 / 顶盖 / 滚花旋钮），`Enclosure/render/` 有装配、爆炸、内部俯视、结合细节、唇边特写五张渲染图。底盒是**完整平底、无板卡槽**——三块板排针朝下直接堆放，并带 50×35mm 电源模块位置与侧边电源开关口。顶盖与底盒共用同一圆角轮廓，盒口是平齐口沿，四角螺柱顶面与口沿共面承托顶盖；顶盖下方四条直唇边插入内腔定位、四角给螺柱让位。`Enclosure/verify_fit.py` 会把这些配合关系做成自动检查。
 
 两套方案互相独立，选一套打印即可。尺寸按标准值与实物照片估算，**打印前务必实测并改参数区**（`MountBracket/bracket.py` 顶部 / `Enclosure/enclosure.py` 的 `P` 字典），然后双击各自的 `regen.bat` 重新导出。
 
@@ -132,7 +132,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 ├── ESP32S3_Blink/                点灯 / 串口 / 烧录链路的最小验证工程
 ├── HapticConsole/              ★ 本地 Web 上位机（server.py + index.html + start.bat）
 ├── MountBracket/                 开放式三板台架（bracket.py + 5 STL + 装配图）
-├── Enclosure/                  ★ Blender 整机外壳（enclosure.py + .blend + 3 STL + 渲染）
+├── Enclosure/                  ★ Blender 整机外壳（enclosure.py + .blend + 3 STL + 5 渲染 + verify_fit.py）
 ├── docs/                         接线、固件、上位机、机械、排坑五篇文档
 └── README.md / LICENSE / .gitignore / .gitattributes
 ```
