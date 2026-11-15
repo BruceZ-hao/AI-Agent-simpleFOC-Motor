@@ -17,6 +17,7 @@
 
 #include <Arduino.h>
 #include <SPI.h>
+#include <math.h>       // sqrtf()：圆角屏遮罩逐行求圆弧
 
 /* 背光驱动方式：0 = 普通 GPIO 常高/常低（默认，长杜邦线最稳）
  *                1 = LEDC 5kHz PWM 调光
@@ -191,6 +192,42 @@ class ST7789P3 {
   }
 
   void fillScreen(uint16_t c) { fillRect(0, 0, _w, _h, c); }
+
+  /* 圆角屏（手表屏）适配：把四角被玻璃切掉的区域刷成底色 bg。
+   *
+   * 物理玻璃是圆角，但 GRAM 仍然是 240x284 的完整矩形：如果不处理四角，
+   * 直角亮块会从玻璃圆角外露出，左上/右上的文字也会被切掉半个字。
+   * 这里按 x²+y²=r² 逐行算出该行要遮掉的水平宽度，四个角各刷一条 1px
+   * 高的矩形。r 是像素半径，换算关系：
+   *   可视区约 30.5 mm 宽 / 240 px ≈ 0.127 mm/px
+   *   R4 mm ≈ 31 px（本固件默认 TFT_CORNER_PX=30）
+   * edge >= 0 时在遮罩边界补一条 1px 亮线，测试图里用来肉眼对齐玻璃圆角，
+   * 配合运行时 W<px> 命令校准；仪表盘传 -1 不描边。
+   * 开销：r=30 时 120 次窗口写入，4MHz 下约 5ms，相对 150ms 帧周期可忽略。
+   */
+  void applyCornerMask(uint16_t r, uint16_t bg, int16_t edge = -1) {
+    if (r == 0) return;
+    if (r > 80) r = 80;
+    for (int16_t y = 0; y < (int16_t)r; y++) {
+      const float dy = (float)r - (float)y - 0.5f;
+      const float dx = sqrtf((float)r * r - dy * dy);
+      int16_t cut = (int16_t)((float)r - dx + 0.5f);
+      if (cut <= 0) continue;
+      if (cut > _w / 2) cut = _w / 2;
+      const int16_t yb = _h - 1 - y;
+      fillRect(0,        y,  cut, 1, bg);       // 左上
+      fillRect(_w - cut, y,  cut, 1, bg);       // 右上
+      fillRect(0,        yb, cut, 1, bg);       // 左下
+      fillRect(_w - cut, yb, cut, 1, bg);       // 右下
+      if (edge >= 0) {
+        const uint16_t e = (uint16_t)edge;
+        fillRect(cut,          y,  1, 1, e);
+        fillRect(_w - cut - 1, y,  1, 1, e);
+        fillRect(cut,          yb, 1, 1, e);
+        fillRect(_w - cut - 1, yb, 1, 1, e);
+      }
+    }
+  }
 
   void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) {
     if (w <= 0 || h <= 0) return;

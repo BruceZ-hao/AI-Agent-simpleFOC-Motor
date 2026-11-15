@@ -31,7 +31,8 @@ enum : uint8_t {
   TFT_REQ_BGR       = 1 << 2,
   TFT_REQ_OFFSET    = 1 << 3,
   TFT_REQ_BACKLIGHT = 1 << 4,
-  TFT_REQ_SPEED     = 1 << 5
+  TFT_REQ_SPEED     = 1 << 5,
+  TFT_REQ_CORNER    = 1 << 6
 };
 
 /* 不用 printf 的 %f（有些 newlib-nano 会裁掉浮点格式化），自己拼整数 */
@@ -66,7 +67,8 @@ class TFTDashboard {
       : _tft(sck, mosi, miso, cs, dc, rst, bl), _s(s), _w(240), _h(284),
         _req(0), _reqX(0), _reqY(0), _test(false), _needRebuild(true),
         _frozen(false), _needleValid(false), _oldX(0), _oldY(0),
-        _testX(10), _testDir(1), _frames(0), _fpsT0(0), _keepAlive(0), _reqHz(0) {}
+        _testX(10), _testDir(1), _frames(0), _fpsT0(0), _keepAlive(0), _reqHz(0),
+        _cornerR(30), _reqCorner(0) {}
 
   bool begin(uint32_t hz, uint16_t w, uint16_t h,
              uint8_t ox, uint8_t oy, bool inv, bool bgr) {
@@ -84,6 +86,7 @@ class TFTDashboard {
     _tft.fillRect(70, 170, 100,  40, TFT_BLUE);
     _tft.text(28, 230, "TFT OK",         TFT_BLACK, TFT_WHITE, 2);
     _tft.text(16, 256, "ST7789P3 DC FIX", TFT_BLACK, TFT_WHITE, 2);
+    _tft.applyCornerMask(_cornerR, TFT_BLACK);   // 白底也要切成圆角屏
   }
 
   /* P 命令：冻结成「只画一帧静态图、之后不再写 GRAM」的模式。
@@ -91,6 +94,12 @@ class TFTDashboard {
    * 冻结后仍花屏/黑屏 = 初始化或硬件问题。bool 是单字节，跨核无需加锁。 */
   bool frozen() const     { return _frozen; }
   void setFrozen(bool f)  { _frozen = f; }
+
+  /* 圆角屏：setup() 里用 TFT_CORNER_PX 设初值；运行时 W<px> 通过 requestCorner
+   * 只置标志位，由 core 0 在帧首统一生效，避免双核同时操作 SPI。 */
+  uint16_t cornerR() const         { return _cornerR; }
+  void setCorner(uint16_t px)      { _cornerR = (px > 80) ? 80 : px; }
+  void requestCorner(uint16_t px)  { _reqCorner = (px > 80) ? 80 : px; _req |= TFT_REQ_CORNER; }
 
   /* core 1 只置位，真正生效在 core 0 的帧首，保证 SPI 单核独占 */
   void request(uint8_t bit)            { _req |= bit; }
@@ -111,17 +120,22 @@ class TFTDashboard {
     if (r & TFT_REQ_INVERT) { _tft.setInvert(!_tft.invert()); cfg = true; }
     if (r & TFT_REQ_OFFSET) { _tft.setOffsets(_reqX, _reqY);  cfg = true; }
     if (r & TFT_REQ_TEST)   { _test = !_test;                 cfg = true; }
+    if (r & TFT_REQ_CORNER) { _cornerR = _reqCorner;          cfg = true; }
     if (cfg || _needRebuild) {
       if (_test) drawTest(); else drawStatic();
       _needRebuild = false;
       _needleValid = false;
-      Serial.println(F("TFT: static frame drawn (DC fix active)"));
+      // 测试图里沿遮罩边界画一条红线，用来和玻璃圆角对齐（W<px> 校准）
+      cornerMask();
+      Serial.println(F("TFT: static frame drawn (DC fix + rounded corners)"));
     }
     // 每 20 帧（10FPS 下约 2 秒）重申 DISPON：万一一帧 SPI 毛刺把
     // RAMWR 打成 DISPOFF，屏幕最多黑 2 秒就会自己回来，不用按 RESET。
     if (++_keepAlive >= 20) { _keepAlive = 0; _tft.assertDisplayOn(); }
     if (_frozen) return;               // 冻结：保留静态画面，不再写 GRAM
     if (_test) testAnimation(); else drawDynamic();
+    // 动态刷新会覆盖顶部标签等靠边区域，所以每帧末尾重涂四角遮罩
+    cornerMask();
     countFps();
   }
 
@@ -135,10 +149,17 @@ class TFTDashboard {
   uint32_t _frames, _fpsT0;
   uint16_t _keepAlive;
   volatile uint32_t _reqHz;
+  uint16_t _cornerR;                 // 圆角屏半径 [px]，0 = 关闭遮罩
+  volatile uint16_t _reqCorner;      // W 命令的跨核请求值
 
   static const int16_t CX = 120, CY = 112, RING = 42, NEEDLE = 31;
   static const int16_t BX = 8, BY = 170, BW = 224, BH = 12;
   static const int16_t ROW_Y = 186, ROW_H = 16;
+
+  /* 四角遮罩统一入口：仪表盘只用黑底；测试图额外描红边便于对齐玻璃圆角 */
+  void cornerMask() {
+    _tft.applyCornerMask(_cornerR, TFT_BLACK, _test ? (int16_t)TFT_RED : -1);
+  }
 
   void countFps() {
     _frames++;
@@ -171,7 +192,7 @@ class TFTDashboard {
   void drawStatic() {
     static const char* labels[6] = { "MODE", "TGT", "VEL", "UQ", "K/Z", "SENS" };
     _tft.fillScreen(TFT_BLACK);
-    _tft.text(6, 4, "SIMPLEFOC", TFT_CYAN, TFT_BLACK, 2);
+    _tft.text(34, 4, "SIMPLEFOC", TFT_CYAN, TFT_BLACK, 2);  // 避开左上圆角
     _tft.fillRect(0, 25, _w, 2, TFT_DIM);
     _tft.text(196, 58, "DEG", TFT_GRAY, TFT_BLACK, 1);
 
@@ -189,7 +210,7 @@ class TFTDashboard {
     for (uint8_t i = 0; i < 6; i++) {
       const int16_t y = ROW_Y + i * ROW_H;
       _tft.fillRect(0, y, _w, 1, TFT_DARK);
-      _tft.text(6, y, labels[i], TFT_DIM, TFT_BLACK, 2);
+      _tft.text(10, y, labels[i], TFT_DIM, TFT_BLACK, 2);  // 避开左下圆角
     }
     _tft.fillRect(0, _h - 1, _w, 1, TFT_DIM);
   }

@@ -76,8 +76,11 @@ Blender: 5.3.0   单位: mm
     小于 35.0 x 42.0 mm 模组需要的 35.0 mm；强行开窗口会切进沉台、压住
     散热孔与螺柱沉头，还会破坏已复验通过的平齐口沿 / 四条让位唇边。
     因此做成完全独立的第 6 个零件，与 01~05 没有任何装配关系。
-  面板 54.0 x 56.0 x 3.0 mm R4.0，正面视窗 30.5 x 36.0（比可视区 30 x 35.5 略大，
-    不遮边缘像素），四周留 2.25 / 3.00 mm 压边压住模组 PCB。
+  面板 54.0 x 56.0 x 3.0 mm R4.0，正面视窗 30.5 x 36.0 R4.0 圆角
+    （比可视区 30 x 35.5 略大，不遮边缘像素），四周留 2.25 / 3.00 mm 压边压住模组 PCB。
+  ★ 屏幕玻璃是四周圆角的手表屏：视窗开孔用 rounded_rect_poly 切成 R4.0 圆角，
+    固件侧同步把 GRAM 四角刷黑（TFT_CORNER_PX，串口 W<px> 可实时校准）。
+    规格写 "R0.4" 时按 0.4cm≈4mm 解读；若实测是 0.4mm 就把 tft_win_r 与宏一起改小。
   背面一圈限位框：内框 35.4 x 42.4（模组每边留 0.2 间隙）、外框 38.6 x 45.6，
     深 2.2 mm；下边留 14.0 mm 缺口给 8 根 SPI 排线走出。
   4 个 Ø3.2 M2 自攻柱 (±23.0, ±25.0)，落在圆角圆心附近，最小壁厚 1.40 mm；
@@ -98,7 +101,7 @@ Blender: 5.3.0   单位: mm
   03_knob.stl             119284 bytes | 三角  2384 | 非流形边   0 | 边界边   0 | 体积   12.9 cm3 | 包围盒 37.95 x 37.95 x 13.0
   04_motor_lock_plate.stl  214684 bytes | 三角  4292 | 非流形边   0 | 边界边   0 | 体积   39.6 cm3 | 包围盒 110.0 x 76.0 x 7.0
   05_standalone_motor_plate.stl   82984 bytes | 三角  1658 | 非流形边   0 | 边界边   0 | 体积   16.4 cm3 | 包围盒 60.0 x 60.0 x 5.0
-  06_tft_panel.stl         78684 bytes | 三角  1572 | 非流形边   0 | 边界边   0 | 体积    6.2 cm3 | 包围盒 54.0 x 56.0 x 5.2
+  06_tft_panel.stl         88484 bytes | 三角  1768 | 非流形边   0 | 边界边   0 | 体积    6.3 cm3 | 包围盒 54.0 x 56.0 x 5.2
   判定: 全部水密，可直接切片
 
 【假设尺寸 —— 务必实测后改 P 字典再跑 regen.bat】
@@ -183,9 +186,9 @@ Blender: 5.3.0   单位: mm
   render/07_lock_underside.png 1068872 bytes
   render/08_standalone_plate.png 1081943 bytes
   render/09_standalone_underside.png 1071339 bytes
-  render/10_tft_panel_front.png 1058249 bytes
-  render/11_tft_panel_back.png 1061505 bytes
-  源文件 Enclosure.blend (319671 bytes)
+  render/10_tft_panel_front.png 1062835 bytes
+  render/11_tft_panel_back.png 1063007 bytes
+  源文件 Enclosure.blend (322187 bytes)
 
 改参数：打开 enclosure.py 顶部的 P 字典 -> 双击 regen.bat -> STL / 渲染 / 报告一起刷新。
 ==================================================================

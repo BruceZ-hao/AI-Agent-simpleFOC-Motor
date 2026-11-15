@@ -100,7 +100,10 @@
  * 驱动零依赖（TFT_ST7789P3.h），不用装 TFT_eSPI / Arduino_GFX。
  * 屏幕校准：STAGE 0 = 只测屏（完全不初始化电机）；运行时命令
  *   V 测试图 / I 反色 / C RGB-BGR / N 背光 / O<col>,<row> 显存偏移 /
- *   Q<MHz> 换 SPI 速率 / P 冻结成单帧静态图（A/B 定位刷新问题）。
+ *   Q<MHz> 换 SPI 速率 / P 冻结成单帧静态图（A/B 定位刷新问题）/
+ *   W<px> 圆角屏半径（手表屏四角遮罩，0=关闭）。
+ * 屏幕玻璃是圆角（R≈4mm，像手表屏），GRAM 仍是完整矩形：UI 每帧把
+ * 四角刷成底色并让标题避开圆角，测试图里用红线标出遮罩边界供 W 校准。
  * 驱动修复记录：setWindow() 发完 RAMWR 必须把 DC 拉回高电平，否则全部
  *   像素字节会被当作命令 -> 花屏，且像素里偶发 0x28/0x10 会关屏变黑。
  * 把 USE_TFT 改成 0 即可完全退回原来的纯串口固件。
@@ -213,6 +216,11 @@ static_assert(V_LIMIT / PHASE_R < 5.5f,
 #define TFT_INVERT   1      // IPS 模组多数需 INVON；黑白反了发 I 切换
 #define TFT_BGR      1      // 红蓝互换发 C 切换
 #define TFT_FPS_MS   150    // ~6 FPS：4MHz 下每帧约 0.2s 的 GRAM 写入，别让屏幕一直处于半刷新状态
+/* 圆角屏（手表屏）四角遮罩半径 [px]。
+ * 可视区约 30.5mm / 240px ≈ 0.127 mm/px -> R4mm ≈ 31px，取 30。
+ * 规格里的 "R0.4" 若指 0.4mm（几乎看不出圆角）就改成 3；
+ * 不用重编译：串口发 W<px> 实时调，W0 关闭，对齐后把值写回这里。 */
+#define TFT_CORNER_PX 30
 /* ==================================================== */
 
 #if STAGE == 0 && !USE_TFT
@@ -292,6 +300,16 @@ void doTftFreeze(char*) {
   dashboard.setFrozen(f);
   Serial.println(f ? F("TFT: UI FROZEN - one static frame, no further GRAM writes")
                    : F("TFT: UI RESUMED - dynamic dashboard"));
+}
+/* W<px>：圆角屏四角遮罩半径，单位像素。发 V 进测试图后，红线就是当前
+ * 遮罩边界，调到刚好贴住玻璃圆角即可；W0 关闭遮罩（直角模式）。
+ * 与 Q/P 一样只置标志位，真正的重画在 core 0 帧首执行。 */
+void doTftCorner(char* cmd) {
+  long px = atol(cmd);
+  if (px < 0 || px > 80) { Serial.println(F("TFT: use W0..W80 (px), e.g. W30")); return; }
+  dashboard.requestCorner((uint16_t)px);
+  Serial.print(F("TFT: rounded corner R = ")); Serial.print(px);
+  Serial.println(F(" px (0 = square corners)"));
 }
 #endif
 
@@ -521,13 +539,15 @@ void printConfig() {
   Serial.print(F("x")); Serial.print(TFT_H);
   Serial.print(F(" @ ")); Serial.print(TFT_SPI_HZ / 1000);
   Serial.print(F(" kHz, BL=")); Serial.print(TFT_BL_PWM ? F("PWM") : F("GPIO"));
-  Serial.print(F(", UI core ")); Serial.println(TFT_UI_CORE);
+  Serial.print(F(", UI core ")); Serial.print(TFT_UI_CORE);
+  Serial.print(F(", corner R=")); Serial.print(TFT_CORNER_PX);
+  Serial.println(F(" px (rounded screen)"));
   Serial.print(F("TFT GPIO SCK/MOSI/CS/DC/RST/BL = "));
   Serial.print(TFT_SCK); Serial.print(F("/")); Serial.print(TFT_MOSI);
   Serial.print(F("/"));  Serial.print(TFT_CS);  Serial.print(F("/"));
   Serial.print(TFT_DC);  Serial.print(F("/"));  Serial.print(TFT_RST);
   Serial.print(F("/"));  Serial.println(TFT_BL);
-  Serial.println(F("TFT cmds: V test / I invert / C RGB-BGR / N backlight / O<col>,<row> / Q<MHz> speed / P freeze"));
+  Serial.println(F("TFT cmds: V test / I invert / C RGB-BGR / N backlight / O<col>,<row> / Q<MHz> speed / P freeze / W<px> corner"));
 #endif
   Serial.println(F("====================================================="));
 }
@@ -546,8 +566,9 @@ void setup() {
   // 开机画面也已经亮起，能立刻判断是屏的问题还是电机的问题。
   dashboard.begin(TFT_SPI_HZ, TFT_W, TFT_H, TFT_COL_OFS, TFT_ROW_OFS,
                   TFT_INVERT != 0, TFT_BGR != 0);
+  dashboard.setCorner(TFT_CORNER_PX);          // 圆角屏四角遮罩
   dashboard.showSplash();
-  Serial.println(F("TFT: splash drawn (WHITE bg + ORANGE block), DC fix active"));
+  Serial.println(F("TFT: splash drawn (WHITE bg + ORANGE block + rounded corners)"));
   command.add('V', doTftTest,   "V toggle TFT test pattern");
   command.add('I', doTftInvert, "I toggle display inversion");
   command.add('C', doTftBGR,    "C toggle RGB/BGR color order");
@@ -555,10 +576,13 @@ void setup() {
   command.add('O', doTftOffset, "O<col>,<row> set CASET/RASET offset");
   command.add('Q', doTftSpeed,  "Q<MHz> set SPI speed (1..40)");
   command.add('P', doTftFreeze, "P freeze/resume UI (single-frame A/B test)");
+  command.add('W', doTftCorner, "W<px> rounded-screen corner radius (0=square)");
   Serial.print(F("TFT: ST7789P3 ready, BL="));
   Serial.print(TFT_BL_PWM ? F("PWM") : F("GPIO"));
   Serial.print(F(", UI core "));
-  Serial.println(TFT_UI_CORE);
+  Serial.print(TFT_UI_CORE);
+  Serial.print(F(", corner R=")); Serial.print(TFT_CORNER_PX);
+  Serial.println(F(" px"));
   /* 先让开机画面完整停留 2.5s，期间 core 0 完全不碰 SPI。
    * 之前任务在这之前就启动，第一帧 drawStatic() 会立刻把开机画面刷成黑底，
    * 用户根本分不清「开机画面有没有画对」。 */
@@ -570,7 +594,7 @@ void setup() {
 #if STAGE == 0
   // 只测屏幕：完全不初始化 Wire / driver / motor，电机不会上电、不会校准。
   Serial.println(F("=== STAGE 0: TFT self-test. Motor/driver/sensor NOT initialized. ==="));
-  Serial.println(F("V test / I invert / C RGB-BGR / N backlight / O<col>,<row> / Q<MHz> / P freeze"));
+  Serial.println(F("V test / I invert / C RGB-BGR / N backlight / O<col>,<row> / Q<MHz> / P freeze / W<px> corner"));
   dispState.mode = 3;
   dashboard.request(TFT_REQ_TEST);
   return;
@@ -641,13 +665,13 @@ void setup() {
 #if STAGE == 3
   // 校准时电机会轻微正反各转一下，务必让它空转、别捏着轴
   if (motor.initFOC() != 1) {
-    // 不在这里 while(1)：否则 command.run() 永远不执行，屏幕校准命令 V/I/C/N/O/Q/P
+    // 不在这里 while(1)：否则 command.run() 永远不执行，屏幕校准命令 V/I/C/N/O/Q/P/W
     // 和串口诊断全部失效。常见原因是 12V 没接 / 三相线松 / 轴被卡住。
     focReady = false;
     motor.disable();                   // 未校准时禁止输出，避免按错误电角度乱加电压
     Serial.println(F("initFOC failed! Check pole pairs / sensor direction."));
     Serial.println(F("Motor outputs DISABLED. Check 12V / 3 phases / EN / free shaft."));
-    Serial.println(F("Press RESET to retry. Serial + TFT cmds (V/I/C/N/O/Q/P) stay live."));
+    Serial.println(F("Press RESET to retry. Serial + TFT cmds (V/I/C/N/O/Q/P/W) stay live."));
   }
 #endif
 
@@ -717,7 +741,7 @@ float computeBrakeUq() {
 void loop() {
   updateStatusLed();                     // 非阻塞，不占用 loopFOC 的时间预算
 #if STAGE == 0
-  command.run();                         // 屏幕自检：只处理 V/I/C/N/O/Q/P，电机不参与
+  command.run();                         // 屏幕自检：只处理 V/I/C/N/O/Q/P/W，电机不参与
   _delay(20);
   return;
 #endif
@@ -741,7 +765,7 @@ void loop() {
 #if USE_TFT
     dispState.uq      = 0.0f;
     dispState.enabled = false;
-    dispState.mode    = 4;             // 屏幕显示 FOC FAIL，但 V/I/C/N/O/Q/P 仍可校准
+    dispState.mode    = 4;             // 屏幕显示 FOC FAIL，但 V/I/C/N/O/Q/P/W 仍可校准
 #endif
     _delay(20);
     return;                            // 跳过 loopFOC()/move()，驱动已 disable

@@ -108,6 +108,20 @@ def wall_coverage(segs, axis, val, tol=0.15):
     return total
 
 
+def diagonal_in(segs, xr, yr):
+    """指定 XY 区域内是否存在斜线段（用于验证视窗四角确实被切成圆弧）。
+
+    圆角矩形由多段短直线近似，角部必然同时存在 dx、dy 都非零的线段；
+    直角矩形在该区域只会有水平 / 垂直线段。
+    """
+    for (x0, y0), (x1, y1) in segs:
+        if (abs(x1 - x0) > 0.01 and abs(y1 - y0) > 0.01
+                and all(xr[0] < x < xr[1] for x in (x0, x1))
+                and all(yr[0] < y < yr[1] for y in (y0, y1))):
+            return True
+    return False
+
+
 def segs_in_region(segs, xr, yr):
     """完全落在指定 XY 小矩形内的截面线段数（用于验证排线缺口真的打通）。"""
     n = 0
@@ -339,9 +353,24 @@ def main():
                  wall_coverage(face, 'x', -ww / 2))
         wy = min(wall_coverage(face, 'y', wh / 2),
                  wall_coverage(face, 'y', -wh / 2))
-        chk("正面视窗 %.1f x %.1f 四边贯通" % (ww, wh),
-            wx > wh * 0.85 and wy > ww * 0.85,
-            "X 向墙 %.1f / Y 向墙 %.1f mm" % (wx, wy))
+        # 圆角视窗：x=±ww/2 的直墙只有 wh-2r 长，y=±wh/2 只有 ww-2r 长，
+        # 判据必须按「减去两端圆角后的直墙长度」算，不能沿用整边长度。
+        wr = P["tft_win_r"]
+        straight_x, straight_y = wh - 2 * wr, ww - 2 * wr
+        chk("正面圆角视窗 %.1f x %.1f R%.1f 四边贯通" % (ww, wh, wr),
+            wx > straight_x * 0.85 and wy > straight_y * 0.85,
+            "X 向直墙 %.1f/%.1f / Y 向直墙 %.1f/%.1f mm"
+            % (wx, straight_x, wy, straight_y))
+        arc_ok = []
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                xa, xb = sx * (ww / 2 - wr), sx * ww / 2
+                ya, yb = sy * (wh / 2 - wr), sy * wh / 2
+                arc_ok.append(diagonal_in(face,
+                                          (min(xa, xb) - 0.2, max(xa, xb) + 0.2),
+                                          (min(ya, yb) - 0.2, max(ya, yb) + 0.2)))
+        chk("正面视窗四角为 R%.1f 圆角（匹配手表屏玻璃）" % wr, all(arc_ok),
+            "四角圆弧线段检出 %d/4" % sum(arc_ok))
         press_x = (P["tft_mod_w"] - ww) / 2
         press_y = (P["tft_mod_h"] - wh) / 2
         chk("视窗四周压边压住模组 PCB", press_x > 1.5 and press_y > 1.5

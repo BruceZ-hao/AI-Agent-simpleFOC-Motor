@@ -128,6 +128,7 @@ P = dict(
     # ★ 实物到手先量模组外框，改 tft_mod_w / tft_mod_h / tft_win_* 再跑 regen.bat。
     tft_panel_w=54.0, tft_panel_d=56.0, tft_panel_t=3.0, tft_panel_r=4.0,
     tft_win_w=30.5, tft_win_h=36.0,     # 比可视区每边大 0.25，不遮像素
+    tft_win_r=4.0,                      # ★ 屏幕玻璃四周圆角 R≈4mm（手表屏），视窗开孔同步圆角
     tft_mod_w=35.0, tft_mod_h=42.0,     # ★ 实测模组 PCB 外框（不是可视区）
     tft_mod_clear=0.2,                  # 限位框与模组单边间隙
     tft_frame_wall=1.6, tft_frame_h=2.2,
@@ -735,8 +736,10 @@ def build_tft_panel(coll, mat):
     为什么不做进顶盖：顶盖中心是 Ø42 电机沉台，右侧到内腔壁的净宽只有
     W/2 - wall - motor_recess_d/2 = 31.6 mm，小于 35 x 42 mm 模组需要的
     35 mm；硬塞会切进沉台、压住散热孔和螺柱沉头，还会破坏已验证的结合面。
-    所以做成独立件：正面矩形视窗 + 背面限位框 + 4 个 M2 柱 + 2 个 M3 安装孔，
+    所以做成独立件：正面圆角视窗 + 背面限位框 + 4 个 M2 柱 + 2 个 M3 安装孔，
     用螺钉锁到外壳侧面、支架或台面，位置随意。
+    屏幕是四周圆角的手表屏，正面视窗也必须是圆角矩形，否则四角会露出
+    直角亮边；tft_win_r 与固件里的 TFT_CORNER_PX 是同一个圆角的两面。
 
     Z 约定：背面结构（限位框 / 柱）底面 z=0，面板本体 z=fh..fh+t。
     打印时正面朝平台，限位框与柱朝上，全程无需支撑。
@@ -770,9 +773,13 @@ def build_tft_panel(coll, mat):
     boolean(panel, adds, 'UNION')
 
     cuts = []
-    # 正面视窗：略大于可视区，四周留 2.45 / 3.2 mm 压边压住模组 PCB
-    cuts.append(box("cut_tft_win", P["tft_win_w"], P["tft_win_h"],
-                    z1 + 4.0, 0, 0, z1 / 2, coll))
+    # 正面视窗：略大于可视区，四周留 2.45 / 3.2 mm 压边压住模组 PCB。
+    # 圆角矩形（不是直角 box）：与手表屏玻璃圆角一致，避免直角亮边从圆角外露出。
+    # z 范围 -2 .. z1+2，与原来 box(..., z1+4, cz=z1/2) 完全等价。
+    cuts.append(prism("cut_tft_win",
+                      rounded_rect_poly(P["tft_win_w"], P["tft_win_h"],
+                                        P["tft_win_r"]),
+                      -2.0, z1 + 2.0, coll))
     # 柱内 M2 自攻盲孔：从柱底向上，不穿透正面
     boss_hole_h = fh + 2.0
     for sx in (-1, 1):
@@ -1349,9 +1356,11 @@ def main():
     for o, _ in saved5:
         o.hide_render = True
     tft.hide_render = False
-    scr = box("TMP_tft_screen", P["tft_win_w"] - 0.6,
-              P["tft_win_h"] - 0.6, 0.8, 0, 0,
-              P["tft_frame_h"] + 0.2, helper)
+    scr = prism("TMP_tft_screen",
+                rounded_rect_poly(P["tft_win_w"] - 0.6,
+                                  P["tft_win_h"] - 0.6,
+                                  max(0.3, P["tft_win_r"] - 0.3)),
+                P["tft_frame_h"] - 0.2, P["tft_frame_h"] + 0.6, helper)
     shade(scr, mats["tft_screen"])
     scr.hide_render = False
     bpy.ops.object.light_add(type='AREA', location=(20, -30, 90))
@@ -1625,11 +1634,16 @@ def write_report(stl_report, blend_path, renders):
       % (P["tft_mod_w"], P["tft_mod_h"], P["tft_mod_w"]))
     A("    散热孔与螺柱沉头，还会破坏已复验通过的平齐口沿 / 四条让位唇边。")
     A("    因此做成完全独立的第 6 个零件，与 01~05 没有任何装配关系。")
-    A("  面板 %.1f x %.1f x %.1f mm R%.1f，正面视窗 %.1f x %.1f（比可视区 30 x 35.5 略大，"
-      % (pw, pd, pt, P["tft_panel_r"], P["tft_win_w"], P["tft_win_h"]))
-    A("    不遮边缘像素），四周留 %.2f / %.2f mm 压边压住模组 PCB。"
+    A("  面板 %.1f x %.1f x %.1f mm R%.1f，正面视窗 %.1f x %.1f R%.1f 圆角"
+      % (pw, pd, pt, P["tft_panel_r"], P["tft_win_w"], P["tft_win_h"],
+         P["tft_win_r"]))
+    A("    （比可视区 30 x 35.5 略大，不遮边缘像素），四周留 %.2f / %.2f mm 压边压住模组 PCB。"
       % ((P["tft_mod_w"] - P["tft_win_w"]) / 2,
          (P["tft_mod_h"] - P["tft_win_h"]) / 2))
+    A("  ★ 屏幕玻璃是四周圆角的手表屏：视窗开孔用 rounded_rect_poly 切成 R%.1f 圆角，"
+      % P["tft_win_r"])
+    A("    固件侧同步把 GRAM 四角刷黑（TFT_CORNER_PX，串口 W<px> 可实时校准）。")
+    A("    规格写 \"R0.4\" 时按 0.4cm≈4mm 解读；若实测是 0.4mm 就把 tft_win_r 与宏一起改小。")
     A("  背面一圈限位框：内框 %.1f x %.1f（模组每边留 %.1f 间隙）、外框 %.1f x %.1f，"
       % (inner_w, inner_d, cl, outer_w, outer_d))
     A("    深 %.1f mm；下边留 %.1f mm 缺口给 8 根 SPI 排线走出。"
