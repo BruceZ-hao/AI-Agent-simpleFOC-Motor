@@ -200,7 +200,7 @@ static_assert(V_LIMIT / PHASE_R < 5.5f,
 #define TFT_DC       14
 #define TFT_RST      15
 #define TFT_BL       16     // PWM 背光；不需要调光可直接把 BLK 接 3V3
-#define TFT_SPI_HZ   20000000   // 杜邦线先 20MHz；短线稳定后可试 40000000
+#define TFT_SPI_HZ   8000000    // 长杜邦线实测：20MHz 会有偶发误命令，8MHz 稳定；短线可试 20/40MHz
 #define TFT_W        240
 #define TFT_H        284
 #define TFT_COL_OFS  0      // 画面整体偏移时改这里，或运行时发 O<col>,<row>

@@ -155,6 +155,16 @@ class ST7789P3 {
   }
   void toggleBacklight() { setBacklight(_blDuty > 0 ? 0 : 210); }
 
+  /* 自愈：长杜邦线 / 20MHz 下偶发毛刺可能把 0x2C(RAMWR) 打歪成
+   * 0x28(DISPOFF)，屏幕会一直黑到下次硬复位。显示任务每 2 秒重申
+   * 一次 DISPON；面板本来就在显示状态时这条命令是无害的空操作。
+   * 只由 core 0 的刷屏任务调用，不与其它 SPI 访问并发。 */
+  void assertDisplayOn() {
+    txBegin();
+    writeCmd(0x29);                 // DISPON
+    txEnd();
+  }
+
   void fillScreen(uint16_t c) { fillRect(0, 0, _w, _h, c); }
 
   void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t c) {

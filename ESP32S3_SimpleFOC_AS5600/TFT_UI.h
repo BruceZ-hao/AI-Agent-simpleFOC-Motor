@@ -65,7 +65,7 @@ class TFTDashboard {
       : _tft(sck, mosi, miso, cs, dc, rst, bl), _s(s), _w(240), _h(284),
         _req(0), _reqX(0), _reqY(0), _test(false), _needRebuild(true),
         _needleValid(false), _oldX(0), _oldY(0),
-        _testX(10), _testDir(1), _frames(0), _fpsT0(0) {}
+        _testX(10), _testDir(1), _frames(0), _fpsT0(0), _keepAlive(0) {}
 
   bool begin(uint32_t hz, uint16_t w, uint16_t h,
              uint8_t ox, uint8_t oy, bool inv, bool bgr) {
@@ -101,6 +101,9 @@ class TFTDashboard {
       _needRebuild = false;
       _needleValid = false;
     }
+    // 每 40 帧（20FPS 下约 2 秒）重申 DISPON：万一一帧 SPI 毛刺把
+    // RAMWR 打成 DISPOFF，屏幕最多黑 2 秒就会自己回来，不用按 RESET。
+    if (++_keepAlive >= 40) { _keepAlive = 0; _tft.assertDisplayOn(); }
     if (_test) testAnimation(); else drawDynamic();
     countFps();
   }
@@ -113,6 +116,7 @@ class TFTDashboard {
   bool _test, _needRebuild, _needleValid;
   int16_t _oldX, _oldY, _testX, _testDir;
   uint32_t _frames, _fpsT0;
+  uint16_t _keepAlive;
 
   static const int16_t CX = 120, CY = 112, RING = 42, NEEDLE = 31;
   static const int16_t BX = 8, BY = 170, BW = 224, BH = 12;
