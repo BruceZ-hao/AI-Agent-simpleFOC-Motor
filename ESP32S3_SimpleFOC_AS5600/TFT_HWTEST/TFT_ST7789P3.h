@@ -18,6 +18,14 @@
 #include <Arduino.h>
 #include <SPI.h>
 
+/* 背光驱动方式：0 = 普通 GPIO 常高/常低（默认，长杜邦线最稳）
+ *                1 = LEDC 5kHz PWM 调光
+ * 5kHz PWM 会在共用的 3V3/GND 长线上产生 80~150mA 脉动，容易把高速
+ * SPI 数据打歪；先用 0 排查，确认画面稳定后再改 1 试调光。 */
+#ifndef TFT_BL_PWM
+#define TFT_BL_PWM 0
+#endif
+
 /* RGB565 换色，另附几个常用常量 */
 static inline uint16_t tftRGB565(uint8_t r, uint8_t g, uint8_t b) {
   return ((uint16_t)(r & 0xF8) << 8) | ((uint16_t)(g & 0xFC) << 3) | (uint16_t)(b >> 3);
@@ -108,8 +116,13 @@ class ST7789P3 {
     digitalWrite(_dc, HIGH);
     digitalWrite(_rst, HIGH);
     if (_bl >= 0) {
+#if TFT_BL_PWM
       ledcAttach(_bl, 5000, 8);        // Arduino-ESP32 3.x API
       ledcWrite(_bl, _blDuty);
+#else
+      pinMode(_bl, OUTPUT);            // 纯 GPIO：无 PWM 纹波，抗干扰最好
+      digitalWrite(_bl, _blDuty > 0 ? HIGH : LOW);
+#endif
     }
 
     // 用默认 FSPI 引脚（S3: SCK=12 MOSI=11 MISO=13 SS=10），
@@ -151,9 +164,21 @@ class ST7789P3 {
   void setBGR(bool on)    { _bgr = on;    applyOrientation(); }
   void setBacklight(uint8_t duty) {
     _blDuty = duty;
-    if (_bl >= 0) ledcWrite(_bl, duty);
+    if (_bl < 0) return;
+#if TFT_BL_PWM
+    ledcWrite(_bl, duty);
+#else
+    digitalWrite(_bl, duty > 0 ? HIGH : LOW);   // 只有开/关，无调光
+#endif
   }
   void toggleBacklight() { setBacklight(_blDuty > 0 ? 0 : 210); }
+
+  /* 运行时换 SPI 速率并重新初始化面板（Q 命令）。
+   * 只改 SPISettings 不够：若高速下初始化命令本身被打歪，屏幕会一直停在
+   * 未 DISPON 的状态，必须重新走一遍 SWRESET/SLPOUT/DISPON。 */
+  void reinit(uint32_t hz) {
+    begin(hz, _w, _h, _colOfs, _rowOfs, _invert, _bgr, false);
+  }
 
   /* 自愈：长杜邦线 / 20MHz 下偶发毛刺可能把 0x2C(RAMWR) 打歪成
    * 0x28(DISPOFF)，屏幕会一直黑到下次硬复位。显示任务每 2 秒重申

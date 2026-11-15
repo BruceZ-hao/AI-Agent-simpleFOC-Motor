@@ -26,7 +26,7 @@
 | `PP check: fail - estimated pp: N` | 极对数不对 | 把 `POLE_PAIRS` 改成 N 重编译；正常应打印 `PP check: OK!` |
 | `ERR-MOT: No current sense.` | 驱动板无电流采样，库退回电压模式 | **无害**，忽略 |
 | FAULT 灯亮 / 电机发烫 | 过流 / 过温 / 欠压，或 `voltage_limit / 相阻` 太大 | 立刻断电；查相线与限幅，低阻电机从 0.5V 起 |
-| 上电校准失败 `ERR-MOT:Failed to notice movement` | 校准时 12V 没开、三相没接、轴被捏住 | 保持供电与接线、轴空转，按 RESET 重来；此时电机输出已禁用、屏幕显示 `FOC FAIL`，但串口与 `V/I/C/N/O` 屏幕校准命令仍可用 |
+| 上电校准失败 `ERR-MOT:Failed to notice movement` | 校准时 12V 没开、三相没接、轴被捏住 | 保持供电与接线、轴空转，按 RESET 重来；此时电机输出已禁用、屏幕显示 `FOC FAIL`，但串口与 `V/I/C/N/O/Q` 屏幕校准命令仍可用 |
 
 ## 抖动（两个不同的原因）
 

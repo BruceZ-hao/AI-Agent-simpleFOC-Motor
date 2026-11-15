@@ -143,7 +143,7 @@ HAPTIC READY (quiet). Twist the shaft by hand and let go -> snaps back.
 #define V_LIMIT      3.0f   // 实测 1V 带不动、3V 才转
 #define PHASE_R      10.0f  // 万用表量任意两相 ÷2
 // 弹簧：Kp 8.0 / Kd 0.20 / 死区 0.012 / 速度低通 0.05s / 下采样 3
-// TFT：GPIO 12/11/10/14/15/16，8MHz，240x284，偏移 0/0，20 FPS @ core 0
+// TFT：GPIO 12/11/10/14/15/16，1MHz + GPIO 背光（Q<MHz> 可提速），240x284，10 FPS @ core 0
 ```
 
 ## 目录结构

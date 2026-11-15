@@ -30,7 +30,8 @@ enum : uint8_t {
   TFT_REQ_INVERT    = 1 << 1,
   TFT_REQ_BGR       = 1 << 2,
   TFT_REQ_OFFSET    = 1 << 3,
-  TFT_REQ_BACKLIGHT = 1 << 4
+  TFT_REQ_BACKLIGHT = 1 << 4,
+  TFT_REQ_SPEED     = 1 << 5
 };
 
 /* 不用 printf 的 %f（有些 newlib-nano 会裁掉浮点格式化），自己拼整数 */
@@ -65,7 +66,7 @@ class TFTDashboard {
       : _tft(sck, mosi, miso, cs, dc, rst, bl), _s(s), _w(240), _h(284),
         _req(0), _reqX(0), _reqY(0), _test(false), _needRebuild(true),
         _needleValid(false), _oldX(0), _oldY(0),
-        _testX(10), _testDir(1), _frames(0), _fpsT0(0), _keepAlive(0) {}
+        _testX(10), _testDir(1), _frames(0), _fpsT0(0), _keepAlive(0), _reqHz(0) {}
 
   bool begin(uint32_t hz, uint16_t w, uint16_t h,
              uint8_t ox, uint8_t oy, bool inv, bool bgr) {
@@ -73,18 +74,22 @@ class TFTDashboard {
     return _tft.begin(hz, w, h, ox, oy, inv, bgr, false);
   }
 
-  /* 只在 setup()（core 1、尚无显示任务）调用 */
+  /* 只在 setup()（core 1、尚无显示任务）调用。
+   * 故意做成高对比纯色块而不是文字开机画面：只要看见白底 + 橙块，就能
+   * 确定「初始化 + 第一帧 SPI」是通的，与后续 core 0 持续刷新分开判断。 */
   void showSplash() {
-    _tft.fillScreen(TFT_BLACK);
-    _tft.drawRect(6, 6, _w - 12, _h - 12, TFT_DIM);
-    _tft.text(24, 108, "SIMPLEFOC", TFT_CYAN,  TFT_BLACK, 3);
-    _tft.text(48, 150, "1.83 TFT",  TFT_WHITE, TFT_BLACK, 2);
-    _tft.text(40, 182, "240 x 284", TFT_GRAY,  TFT_BLACK, 2);
+    _tft.fillScreen(TFT_WHITE);
+    _tft.fillRect(20,  40, 200, 100, TFT_BLACK);
+    _tft.fillRect(32,  52, 176,  76, TFT_ORANGE);
+    _tft.fillRect(70, 170, 100,  40, TFT_BLUE);
+    _tft.text(28, 230, "TFT OK",       TFT_BLACK, TFT_WHITE, 2);
+    _tft.text(16, 256, "1MHz GPIO BL", TFT_BLACK, TFT_WHITE, 2);
   }
 
   /* core 1 只置位，真正生效在 core 0 的帧首，保证 SPI 单核独占 */
   void request(uint8_t bit)            { _req |= bit; }
   void requestOffsets(uint8_t x, uint8_t y) { _reqX = x; _reqY = y; _req |= TFT_REQ_OFFSET; }
+  void requestSpeed(uint32_t hz)       { _reqHz = hz; _req |= TFT_REQ_SPEED; }
 
   /* 由 core 0 的 tftTask 每帧调用一次 */
   void renderFrame() {
@@ -92,6 +97,10 @@ class TFTDashboard {
     _req = 0;
     bool cfg = false;
     if (r & TFT_REQ_BACKLIGHT) _tft.toggleBacklight();
+    if (r & TFT_REQ_SPEED) {
+      _tft.reinit(_reqHz);             // 硬件复位 + 重发完整初始化序列
+      cfg = true;
+    }
     if (r & TFT_REQ_BGR)    { _tft.setBGR(!_tft.bgr());       cfg = true; }
     if (r & TFT_REQ_INVERT) { _tft.setInvert(!_tft.invert()); cfg = true; }
     if (r & TFT_REQ_OFFSET) { _tft.setOffsets(_reqX, _reqY);  cfg = true; }
@@ -101,9 +110,9 @@ class TFTDashboard {
       _needRebuild = false;
       _needleValid = false;
     }
-    // 每 40 帧（20FPS 下约 2 秒）重申 DISPON：万一一帧 SPI 毛刺把
+    // 每 20 帧（10FPS 下约 2 秒）重申 DISPON：万一一帧 SPI 毛刺把
     // RAMWR 打成 DISPOFF，屏幕最多黑 2 秒就会自己回来，不用按 RESET。
-    if (++_keepAlive >= 40) { _keepAlive = 0; _tft.assertDisplayOn(); }
+    if (++_keepAlive >= 20) { _keepAlive = 0; _tft.assertDisplayOn(); }
     if (_test) testAnimation(); else drawDynamic();
     countFps();
   }
@@ -117,6 +126,7 @@ class TFTDashboard {
   int16_t _oldX, _oldY, _testX, _testDir;
   uint32_t _frames, _fpsT0;
   uint16_t _keepAlive;
+  volatile uint32_t _reqHz;
 
   static const int16_t CX = 120, CY = 112, RING = 42, NEEDLE = 31;
   static const int16_t BX = 8, BY = 170, BW = 224, BH = 12;

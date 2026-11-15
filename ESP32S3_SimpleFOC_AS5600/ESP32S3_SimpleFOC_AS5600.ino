@@ -200,14 +200,16 @@ static_assert(V_LIMIT / PHASE_R < 5.5f,
 #define TFT_DC       14
 #define TFT_RST      15
 #define TFT_BL       16     // PWM 背光；不需要调光可直接把 BLK 接 3V3
-#define TFT_SPI_HZ   8000000    // 长杜邦线实测：20MHz 会有偶发误命令，8MHz 稳定；短线可试 20/40MHz
+#define TFT_SPI_HZ   1000000UL  // 保守起步：1MHz 是硬件隔离测试实测能出图的速率
+#define TFT_BL_PWM   0          // 0=GPIO 常高（无 PWM 纹波，推荐）；1=LEDC 5kHz PWM 调光
+#define TFT_UI_CORE  0          // 刷屏任务所在核；排查 SPI 跨核问题时可改 1
 #define TFT_W        240
 #define TFT_H        284
 #define TFT_COL_OFS  0      // 画面整体偏移时改这里，或运行时发 O<col>,<row>
 #define TFT_ROW_OFS  0
 #define TFT_INVERT   1      // IPS 模组多数需 INVON；黑白反了发 I 切换
 #define TFT_BGR      1      // 红蓝互换发 C 切换
-#define TFT_FPS_MS   50     // 20 FPS，刷新全部在 core 0
+#define TFT_FPS_MS   100    // 10 FPS；1MHz 下全屏刷一次约 1 秒，先降低刷新负担
 /* ==================================================== */
 
 #if STAGE == 0 && !USE_TFT
@@ -242,8 +244,13 @@ TFTDashboard dashboard(&dispState, TFT_SCK, TFT_MOSI, TFT_MISO,
 /* 显示任务钉在 core 0。loop()/loopFOC() 跑 core 1，SPI 阻塞传输不会
  * 打断电流环；优先级 1 与 loopTask 同级，不会饿死系统服务。 */
 void tftTask(void*) {
+  uint32_t n = 0;
   for (;;) {
     dashboard.renderFrame();
+    // 每 100 帧打印一次，用来确认刷屏任务确实在 core 0 跑（而非卡死）
+    if (++n % 100 == 0) {
+      Serial.print(F("TFT: UI frames=")); Serial.println((unsigned long)n);
+    }
     vTaskDelay(pdMS_TO_TICKS(TFT_FPS_MS));
   }
 }
@@ -254,6 +261,14 @@ void doTftTest(char*)   { dashboard.request(TFT_REQ_TEST);      Serial.println(F
 void doTftInvert(char*) { dashboard.request(TFT_REQ_INVERT);    Serial.println(F("TFT: invert toggle")); }
 void doTftBGR(char*)    { dashboard.request(TFT_REQ_BGR);       Serial.println(F("TFT: RGB/BGR toggle")); }
 void doTftBL(char*)     { dashboard.request(TFT_REQ_BACKLIGHT); Serial.println(F("TFT: backlight toggle")); }
+/* Q<MHz>：不重新编译就能逐级提速。发 Q2 / Q4 / Q8 看哪档能稳定出图。 */
+void doTftSpeed(char* cmd) {
+  long mhz = atol(cmd);
+  if (mhz < 1 || mhz > 40) { Serial.println(F("TFT: use Q1..Q40 (MHz), e.g. Q4")); return; }
+  dashboard.requestSpeed((uint32_t)mhz * 1000000UL);
+  Serial.print(F("TFT: SPI -> ")); Serial.print(mhz);
+  Serial.println(F(" MHz, reinit + redraw"));
+}
 void doTftOffset(char* cmd) {
   int x = 0, y = 0;
   if (sscanf(cmd, "%d,%d", &x, &y) == 2) {
@@ -492,14 +507,15 @@ void printConfig() {
 #if USE_TFT
   Serial.print(F("TFT ST7789P3 ")); Serial.print(TFT_W);
   Serial.print(F("x")); Serial.print(TFT_H);
-  Serial.print(F(" @ ")); Serial.print(TFT_SPI_HZ / 1000000);
-  Serial.println(F(" MHz, dashboard on core 0"));
+  Serial.print(F(" @ ")); Serial.print(TFT_SPI_HZ / 1000);
+  Serial.print(F(" kHz, BL=")); Serial.print(TFT_BL_PWM ? F("PWM") : F("GPIO"));
+  Serial.print(F(", UI core ")); Serial.println(TFT_UI_CORE);
   Serial.print(F("TFT GPIO SCK/MOSI/CS/DC/RST/BL = "));
   Serial.print(TFT_SCK); Serial.print(F("/")); Serial.print(TFT_MOSI);
   Serial.print(F("/"));  Serial.print(TFT_CS);  Serial.print(F("/"));
   Serial.print(TFT_DC);  Serial.print(F("/"));  Serial.print(TFT_RST);
   Serial.print(F("/"));  Serial.println(TFT_BL);
-  Serial.println(F("TFT cmds: V test / I invert / C RGB-BGR / N backlight / O<col>,<row> offset"));
+  Serial.println(F("TFT cmds: V test / I invert / C RGB-BGR / N backlight / O<col>,<row> / Q<MHz> speed"));
 #endif
   Serial.println(F("====================================================="));
 }
@@ -519,14 +535,19 @@ void setup() {
   dashboard.begin(TFT_SPI_HZ, TFT_W, TFT_H, TFT_COL_OFS, TFT_ROW_OFS,
                   TFT_INVERT != 0, TFT_BGR != 0);
   dashboard.showSplash();
+  Serial.println(F("TFT: splash drawn (WHITE bg + ORANGE block), hold 2.5s"));
   command.add('V', doTftTest,   "V toggle TFT test pattern");
   command.add('I', doTftInvert, "I toggle display inversion");
   command.add('C', doTftBGR,    "C toggle RGB/BGR color order");
   command.add('N', doTftBL,     "N toggle backlight");
   command.add('O', doTftOffset, "O<col>,<row> set CASET/RASET offset");
-  xTaskCreatePinnedToCore(tftTask, "TFT_UI", 6144, NULL, 1, NULL, 0);
-  Serial.println(F("TFT: ST7789P3 ready, UI task pinned to core 0"));
-  _delay(800);                          // 让开机画面看得见
+  command.add('Q', doTftSpeed,  "Q<MHz> set SPI speed (1..40)");
+  xTaskCreatePinnedToCore(tftTask, "TFT_UI", 6144, NULL, 1, NULL, TFT_UI_CORE);
+  Serial.print(F("TFT: ST7789P3 ready, BL="));
+  Serial.print(TFT_BL_PWM ? F("PWM") : F("GPIO"));
+  Serial.print(F(", UI task pinned to core "));
+  Serial.println(TFT_UI_CORE);
+  _delay(2500);                         // 让高对比开机画面看得清
 #endif
 
 #if STAGE == 0
